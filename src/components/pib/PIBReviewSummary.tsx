@@ -1,10 +1,11 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { PIBDocument, PIBItem, PIB_DOCUMENT_TYPES, TRANSPORT_MODES } from '@/types/pib';
+import { PIBDocument, PIBItem, PIB_DOCUMENT_TYPES } from '@/types/pib';
 import { PIBStatusBadge, PIBLaneBadge } from './PIBStatusBadge';
 import { PIBTaxBreakdown } from './PIBTaxBreakdown';
-import { FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { FileText, AlertCircle, CheckCircle, ShieldCheck, XCircle, AlertTriangle } from 'lucide-react';
+import { isValidIncotermForTransport } from '@/lib/validation/incoterm-transport-rules';
 
 interface AttachmentWithFile {
   document_type: string;
@@ -57,9 +58,18 @@ interface PIBReviewSummaryProps {
   validationErrors?: string[];
 }
 
+// Transport mode labels mapping (codes from database)
+const TRANSPORT_MODE_LABELS: Record<string, string> = {
+  'SEA': 'Sea Freight',
+  'AIR': 'Air Freight',
+  'LAND': 'Land Transport',
+  'RAIL': 'Rail Freight',
+  'MULTI': 'Multimodal Transport',
+};
+
 export function PIBReviewSummary({ formData, items, attachments, validationErrors = [] }: PIBReviewSummaryProps) {
   const getTransportModeName = (code: string): string => {
-    return TRANSPORT_MODES.find(t => t.value === code)?.label || code;
+    return TRANSPORT_MODE_LABELS[code] || code;
   };
 
   const getDocTypeName = (code: string): string => {
@@ -68,29 +78,173 @@ export function PIBReviewSummary({ formData, items, attachments, validationError
 
   const hasAPI = !!formData.importer_api;
 
+  // Check if required documents are uploaded
+  const checkRequiredDocuments = () => {
+    const uploadedTypes = new Set(attachments.map(att => att.document_type));
+    const missingDocs: string[] = [];
+
+    // Always required
+    if (!uploadedTypes.has('INVOICE')) missingDocs.push('Commercial Invoice');
+    if (!uploadedTypes.has('PACKING_LIST')) missingDocs.push('Packing List');
+
+    // Transport-specific required
+    if (formData.transport_mode === 'AIR' && !uploadedTypes.has('AWB')) {
+      missingDocs.push('Air Waybill');
+    } else if (formData.transport_mode === 'SEA' && !uploadedTypes.has('BL')) {
+      missingDocs.push('Bill of Lading');
+    }
+
+    return missingDocs;
+  };
+
+  const missingDocs = checkRequiredDocuments();
+
+  // Comprehensive validation checks
+  const validationChecks = {
+    importer: !!formData.importer_name || !!formData.importer_npwp,
+    supplier: !!formData.supplier_name,
+    incotermTransport: !formData.transport_mode || !formData.incoterm_code || 
+      isValidIncotermForTransport(formData.transport_mode, formData.incoterm_code),
+    hasGoods: items.length > 0,
+    hasDocuments: missingDocs.length === 0,
+    hasWeight: items.every(item => (item.net_weight || 0) > 0),
+    validWeights: items.every(item => (item.gross_weight || 0) >= (item.net_weight || 0)),
+  };
+
+  const allValid = validationErrors.length === 0 && 
+    Object.values(validationChecks).every(v => v) && 
+    missingDocs.length === 0;
+
   return (
     <div className="space-y-4">
-      {/* Validation Status */}
-      {validationErrors.length > 0 ? (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-700 mb-2">
-            <AlertCircle className="h-4 w-4" />
-            <span className="font-medium text-sm">Validation Errors ({validationErrors.length})</span>
+      {/* Comprehensive Validation Status */}
+      <Card className={allValid ? 'border-emerald-300 bg-emerald-50/50' : 'border-red-300 bg-red-50/50'}>
+        <CardHeader className="py-3 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {allValid ? (
+              <>
+                <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                <span className="text-emerald-700">Pre-Submit Validation: PASSED</span>
+              </>
+            ) : (
+              <>
+                <XCircle className="h-5 w-5 text-red-600" />
+                <span className="text-red-700">Pre-Submit Validation: FAILED</span>
+              </>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 pt-0">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {/* Validation Rules Checklist */}
+            <div className="flex items-center gap-2">
+              {validationChecks.importer ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.importer ? 'text-emerald-700' : 'text-red-700'}>
+                Importer NPWP
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {validationChecks.supplier ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.supplier ? 'text-emerald-700' : 'text-red-700'}>
+                Supplier
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {validationChecks.incotermTransport ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.incotermTransport ? 'text-emerald-700' : 'text-red-700'}>
+                Incoterm ↔ Transport
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {validationChecks.hasGoods ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.hasGoods ? 'text-emerald-700' : 'text-red-700'}>
+                Goods Items ({items.length})
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {validationChecks.hasDocuments ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.hasDocuments ? 'text-emerald-700' : 'text-red-700'}>
+                Supporting Documents
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {validationChecks.validWeights ? (
+                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-red-600" />
+              )}
+              <span className={validationChecks.validWeights ? 'text-emerald-700' : 'text-red-700'}>
+                Weight Validation (Gross ≥ Net)
+              </span>
+            </div>
           </div>
-          <ul className="text-xs text-red-600 space-y-1 ml-6 list-disc">
-            {validationErrors.map((error, i) => (
-              <li key={i}>{error}</li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-emerald-700">
-            <CheckCircle className="h-4 w-4" />
-            <span className="font-medium text-sm">Document is valid and ready for submission</span>
-          </div>
-        </div>
-      )}
+          
+          {/* Error Details */}
+          {validationErrors.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-red-200">
+              <p className="text-xs font-medium text-red-700 mb-1.5 flex items-center gap-1">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Validation Errors ({validationErrors.length}):
+              </p>
+              <ul className="text-xs text-red-600 space-y-0.5 ml-5 list-disc">
+                {validationErrors.map((error, i) => (
+                  <li key={i}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {/* Missing Documents */}
+          {missingDocs.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-red-200">
+              <p className="text-xs font-medium text-red-700 mb-1.5 flex items-center gap-1">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Missing Required Documents:
+              </p>
+              <ul className="text-xs text-red-600 space-y-0.5 ml-5 list-disc">
+                {missingDocs.map((doc, i) => (
+                  <li key={i}>{doc}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {/* Ready message */}
+          {allValid && (
+            <div className="mt-3 pt-3 border-t border-emerald-200">
+              <p className="text-xs text-emerald-700 flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4" />
+                <span className="font-medium">Ready for CEISA submission. XML yang dikirim akan sesuai dengan data yang direview.</span>
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-4">
         {/* Importer Info */}

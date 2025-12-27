@@ -8,6 +8,10 @@ import { PEBDocument, PEBItem, PEBStatus } from '@/types/peb';
 import { createAuditLog } from '@/lib/audit/audit-logger';
 import { mapPEBToXML } from '@/lib/edi/xml-mapper';
 import { generateXMLHash, generateTimestamp } from '@/lib/edi/xml-hash';
+import { 
+  validateIncotermTransportCombination, 
+  assertValidIncotermTransport 
+} from '@/lib/validation/incoterm-transport-rules';
 
 export interface CreatePEBInput {
   exporter_id: string;
@@ -111,6 +115,19 @@ async function validatePEBInput(input: CreatePEBInput): Promise<ValidationResult
   // Validate exporter_id
   if (!input.exporter_id || input.exporter_id.trim() === '') {
     errors.push('Exporter ID is required');
+  }
+
+  // CRITICAL: Validate incoterm-transport mode combination (CEISA/DJBC compliance)
+  if (input.transport_mode && input.incoterm_code) {
+    const incotermValidation = validateIncotermTransportCombination(
+      input.transport_mode, 
+      input.incoterm_code
+    );
+    if (!incotermValidation.valid) {
+      errors.push(incotermValidation.error || `Invalid incoterm ${input.incoterm_code} for transport mode ${input.transport_mode}`);
+      // Log audit for invalid attempt
+      console.warn('[AUDIT] INVALID_INCOTERM_TRANSPORT attempted in backend:', incotermValidation.details);
+    }
   }
 
   // Validate goods array
@@ -1298,6 +1315,13 @@ export interface PEBSubmissionValidation {
 /**
  * Validate PEB for Submission
  * Comprehensive validation gate before submit
+ * 
+ * VALIDATION RULES:
+ * 1. Exporter NPWP wajib
+ * 2. Buyer wajib
+ * 3. Transport vs Incoterm validation (CEISA compliance)
+ * 4. Goods validation (HS Code, weights, unit consistency)
+ * 5. Supporting documents validation (dynamic based on transport mode)
  */
 export async function validatePEBForSubmission(peb_id: string): Promise<PEBSubmissionValidation> {
   const errors: string[] = [];
@@ -1332,60 +1356,157 @@ export async function validatePEBForSubmission(peb_id: string): Promise<PEBSubmi
       };
     }
 
-    // Validation Gate 1: Goods items must not be empty
+    // === VALIDATION GATE 1: EXPORTER ===
+    if (!peb.exporter_id && !peb.exporter_name) {
+      errors.push('Exporter NPWP wajib diisi');
+    }
+    
+    // === VALIDATION GATE 2: BUYER ===
+    if (!peb.buyer_id && !peb.buyer_name) {
+      errors.push('Buyer wajib diisi');
+    }
+
+    // === VALIDATION GATE 3: TRANSPORT vs INCOTERM ===
+    if (peb.transport_mode && peb.incoterm_code) {
+      // AIR transport - sea-only incoterms invalid
+      if (peb.transport_mode === 'AIR' && ['FOB', 'CFR', 'CIF', 'FAS'].includes(peb.incoterm_code)) {
+        errors.push(`Incoterm ${peb.incoterm_code} tidak valid untuk transport AIR`);
+      }
+      
+      // Use validation library
+      const incotermValidation = validateIncotermTransportCombination(
+        peb.transport_mode, 
+        peb.incoterm_code
+      );
+      if (!incotermValidation.valid && incotermValidation.error) {
+        errors.push(incotermValidation.error);
+      }
+    }
+
+    // === VALIDATION GATE 4: GOODS ITEMS ===
     const items = peb.items || [];
     if (items.length === 0) {
-      errors.push('At least one goods item is required');
+      errors.push('Minimal satu item barang wajib diisi');
     }
 
-    // Validation Gate 2: FOB value must not be 0
+    // Validate FOB total
     const totalFOB = items.reduce((sum, item) => sum + (item.fob_value || 0), 0);
     if (totalFOB === 0) {
-      errors.push('Total FOB value cannot be 0');
+      errors.push('Total FOB value tidak boleh 0');
     }
 
-    // Validation Gate 3: Each item must have HS Code and Description
-    items.forEach((item, index) => {
+    // Validate each item
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemNum = i + 1;
+      
+      // HS Code wajib
       if (!item.hs_code || item.hs_code.trim() === '') {
-        errors.push(`Item ${index + 1}: HS Code is required`);
+        errors.push(`Item ${itemNum}: HS Code wajib diisi`);
       }
+      
+      // Product description wajib
       if (!item.product_description || item.product_description.trim() === '') {
-        errors.push(`Item ${index + 1}: Product description is required`);
+        errors.push(`Item ${itemNum}: Deskripsi produk wajib diisi`);
       }
-      if (item.quantity <= 0) {
-        errors.push(`Item ${index + 1}: Quantity must be greater than 0`);
+      
+      // Quantity > 0
+      if (!item.quantity || item.quantity <= 0) {
+        errors.push(`Item ${itemNum}: Quantity harus lebih dari 0`);
       }
-    });
-
-    // Validation Gate 4: Exporter must be filled
-    if (!peb.exporter_id && !peb.exporter_name) {
-      errors.push('Exporter information is required');
+      
+      // Net weight > 0
+      if (!item.net_weight || item.net_weight <= 0) {
+        errors.push(`Item ${itemNum}: Net weight harus lebih dari 0`);
+      }
+      
+      // Gross weight >= Net weight
+      if (item.gross_weight !== undefined && item.net_weight !== undefined) {
+        if (item.gross_weight < item.net_weight) {
+          errors.push(`Item ${itemNum}: Gross weight (${item.gross_weight}) tidak boleh kurang dari Net weight (${item.net_weight})`);
+        }
+      }
+      
+      // Unit validation - must match HS Code unit
+      // Fetch HS Code unit from database
+      if (item.hs_code) {
+        try {
+          const { data: hsData } = await supabase
+            .from('hs_codes')
+            .select('unit')
+            .eq('code', item.hs_code)
+            .single();
+          
+          if (hsData?.unit && item.quantity_unit && item.quantity_unit !== hsData.unit) {
+            errors.push(`Item ${itemNum}: Unit (${item.quantity_unit}) tidak sesuai dengan HS Code unit (${hsData.unit})`);
+          }
+        } catch (e) {
+          // Skip unit validation if HS Code lookup fails
+          console.warn(`HS Code unit validation skipped for ${item.hs_code}:`, e);
+        }
+      }
     }
 
-    // Validation Gate 5: Customs office must be filled
+    // === VALIDATION GATE 5: SUPPORTING DOCUMENTS ===
+    if (peb.transport_mode) {
+      // Fetch attachments from database
+      const { data: attachments } = await supabase
+        .from('peb_attachments')
+        .select('document_type')
+        .eq('peb_id', peb_id);
+      
+      const uploadedDocTypes = (attachments || []).map(a => a.document_type);
+      
+      // Always required documents
+      if (!uploadedDocTypes.includes('INVOICE')) {
+        errors.push('Dokumen wajib belum lengkap: Commercial Invoice');
+      }
+      if (!uploadedDocTypes.includes('PACKING_LIST')) {
+        errors.push('Dokumen wajib belum lengkap: Packing List');
+      }
+      
+      // Transport-specific required documents
+      if (peb.transport_mode === 'AIR') {
+        if (!uploadedDocTypes.includes('AWB')) {
+          errors.push('Air Waybill wajib untuk transport AIR');
+        }
+        // Validate no BL for AIR
+        if (uploadedDocTypes.includes('BL')) {
+          warnings.push('Bill of Lading tidak relevan untuk transport AIR');
+        }
+      } else if (peb.transport_mode === 'SEA') {
+        if (!uploadedDocTypes.includes('BL')) {
+          errors.push('Bill of Lading wajib untuk transport SEA');
+        }
+        // Validate no AWB for SEA
+        if (uploadedDocTypes.includes('AWB')) {
+          warnings.push('Air Waybill tidak relevan untuk transport SEA');
+        }
+      }
+    }
+
+    // === VALIDATION GATE 6: CUSTOMS OFFICE ===
     if (!peb.customs_office_code && !peb.customs_office_name) {
-      warnings.push('Customs office is not specified');
+      warnings.push('Customs office belum dipilih');
     }
 
-    // Validation Gate 6: Loading port must be filled
+    // === VALIDATION GATE 7: PORTS ===
     if (!peb.loading_port_code && !peb.loading_port_name) {
-      warnings.push('Loading port is not specified');
+      warnings.push('Loading port belum dipilih');
     }
-
-    // Validation Gate 7: Destination must be filled
     if (!peb.destination_port_code && !peb.destination_country) {
-      warnings.push('Destination port/country is not specified');
+      warnings.push('Destination port/country belum dipilih');
     }
 
-    // Validation Gate 8: Incoterm & Currency sync
+    // === VALIDATION GATE 8: TRADE TERMS ===
     if (!peb.incoterm_code) {
-      warnings.push('Incoterm is not specified');
+      warnings.push('Incoterm belum dipilih');
     }
     if (!peb.currency_code) {
-      warnings.push('Currency is not specified');
+      warnings.push('Currency belum dipilih');
     }
 
-    // Validation Gate 9: TOTALS = SUM(ITEMS) check
+    // === VALIDATION GATE 9: TOTALS CONSISTENCY ===
     const calculatedNetWeight = items.reduce((sum, item) => sum + (item.net_weight || 0), 0);
     const calculatedGrossWeight = items.reduce((sum, item) => sum + (item.gross_weight || 0), 0);
     const calculatedPackages = items.reduce((sum, item) => sum + (item.package_count || 0), 0);
@@ -1466,6 +1587,37 @@ export async function submit_peb(peb_id: string): Promise<SubmitPEBResult> {
     const currentUserId = await getCurrentUserId();
     const currentUserEmail = await getCurrentUserEmail();
     const items = peb.items || [];
+
+    // CRITICAL: Validate incoterm-transport combination before XML generation (CEISA SAFE)
+    if (peb.transport_mode && peb.incoterm_code) {
+      try {
+        assertValidIncotermTransport(peb.transport_mode, peb.incoterm_code);
+      } catch (validationError) {
+        // Log audit for invalid attempt
+        await createAuditLog({
+          action: 'INVALID_INCOTERM_TRANSPORT',
+          entity_type: 'peb_documents',
+          entity_id: peb_id,
+          actor_id: currentUserId || undefined,
+          actor_email: currentUserEmail || undefined,
+          notes: 'Invalid incoterm-transport combination attempted',
+          metadata: {
+            transport_mode: peb.transport_mode,
+            incoterm: peb.incoterm_code,
+            error: validationError instanceof Error ? validationError.message : 'Unknown error',
+          },
+        });
+        return {
+          success: false,
+          peb_id,
+          status: null,
+          xml_path: null,
+          xml_hash: null,
+          locked: false,
+          errors: [`CEISA Validation Failed: ${validationError instanceof Error ? validationError.message : 'Invalid incoterm-transport combination'}`],
+        };
+      }
+    }
 
     // Recalculate totals from items to ensure TOTALS = SUM(ITEMS)
     const totalFOB = items.reduce((sum, item) => sum + (item.fob_value || 0), 0);

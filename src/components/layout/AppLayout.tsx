@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -37,6 +37,34 @@ export function AppLayout({ children }: AppLayoutProps) {
           {children}
         </main>
       </div>
+
+      {/* MOBILE AI FLOATING BUTTON */}
+      <button
+        onClick={() => {
+          const event = new KeyboardEvent('keydown', {
+            key: 'k',
+            code: 'KeyK',
+            metaKey: true,
+            bubbles: true,
+            cancelable: true
+          });
+          document.dispatchEvent(event);
+        }}
+        className="
+          fixed bottom-20 right-4
+          z-[60]
+          flex items-center justify-center
+          h-14 w-14
+          rounded-full
+          bg-indigo-600 text-white
+          shadow-lg hover:bg-indigo-700
+          active:scale-95 transition-all
+          md:hidden
+        "
+        aria-label="Open AI Assistant"
+      >
+        <Sparkles className="h-6 w-6" />
+      </button>
     </div>
   );
 }

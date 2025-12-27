@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/tooltip';
 import { supabase } from '@/lib/supabase';
 import { fetchDashboardKPIData, DashboardKPIData, StatusCounts } from '@/lib/notifications/notification-service';
+import { callCeisaProxy } from '@/services/ceisa';
 
 // Types for sync status tracking
 interface SyncStatus {
@@ -107,10 +108,10 @@ const Dashboard = () => {
         if (!pebResult.error) {
           pebCount = pebResult.count || 0;
         } else {
-          console.warn('PEB query skipped:', pebResult.error.message);
+          console.warn('PEB query skipped:', pebResult.error);
         }
-      } catch {
-        console.warn('PEB documents not accessible');
+      } catch (error) {
+        console.warn('PEB query skipped:', error);
       }
       
       try {
@@ -122,10 +123,10 @@ const Dashboard = () => {
         if (!pibResult.error) {
           pibCount = pibResult.count || 0;
         } else {
-          console.warn('PIB query skipped:', pibResult.error.message);
+          console.warn('PIB query skipped:', pibResult.error);
         }
-      } catch {
-        console.warn('PIB documents not accessible');
+      } catch (error) {
+        console.warn('PIB query skipped:', error);
       }
       
       const totalCount = pebCount + pibCount;
@@ -165,6 +166,18 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Test CEISA Proxy function
+  const testCeisa = async () => {
+    try {
+      const res = await callCeisaProxy({
+        action: "health_check"
+      });
+      console.log("CEISA RESPONSE:", res);
+    } catch (error) {
+      console.error("CEISA Test Error:", error);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-4">
@@ -194,6 +207,10 @@ const Dashboard = () => {
                 Sync CEISA
               </Button>
             )}
+            <Button onClick={testCeisa} variant="secondary" size="sm" className="gap-1.5">
+              <Activity size={14} />
+              Test CEISA
+            </Button>
           </div>
         </div>
 

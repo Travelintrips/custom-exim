@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -7,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Upload, FileText, Trash2, Download, Eye } from 'lucide-react';
+import { Upload, FileText, Trash2, Download, Eye, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { PIBAttachment, PIB_DOCUMENT_TYPES } from '@/types/pib';
 import { cn } from '@/lib/utils';
 
@@ -22,16 +23,71 @@ interface PIBAttachmentsProps {
   onAttachmentsChange: (attachments: AttachmentWithFile[]) => void;
   existingAttachments?: PIBAttachment[];
   isReadOnly?: boolean;
+  transportMode?: string;
 }
 
 export function PIBAttachments({ 
   attachments, 
   onAttachmentsChange, 
   existingAttachments = [],
-  isReadOnly 
+  isReadOnly,
+  transportMode 
 }: PIBAttachmentsProps) {
   const [selectedType, setSelectedType] = useState<string>('INVOICE');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get required documents based on transport mode
+  const getRequiredDocuments = () => {
+    const baseRequired = [
+      { code: 'INVOICE', label: 'Commercial Invoice', required: true },
+      { code: 'PACKING_LIST', label: 'Packing List', required: true },
+    ];
+
+    if (transportMode === 'AIR') {
+      return [...baseRequired, { code: 'AWB', label: 'Air Waybill', required: true }];
+    } else if (transportMode === 'SEA') {
+      return [...baseRequired, { code: 'BL', label: 'Bill of Lading', required: true }];
+    }
+
+    // Default: show both options if transport mode not set
+    return [
+      ...baseRequired,
+      { code: 'BL', label: 'Bill of Lading', required: false },
+      { code: 'AWB', label: 'Air Waybill', required: false },
+    ];
+  };
+
+  const requiredDocuments = getRequiredDocuments();
+
+  // Get relevant document types for dropdown based on transport mode
+  const getRelevantDocTypes = () => {
+    if (!transportMode) return PIB_DOCUMENT_TYPES;
+
+    // Filter out irrelevant document types
+    if (transportMode === 'AIR') {
+      return PIB_DOCUMENT_TYPES.filter(type => type.value !== 'BL');
+    } else if (transportMode === 'SEA') {
+      return PIB_DOCUMENT_TYPES.filter(type => type.value !== 'AWB');
+    }
+
+    return PIB_DOCUMENT_TYPES;
+  };
+
+  const relevantDocTypes = getRelevantDocTypes();
+
+  // Check if all required documents are uploaded
+  const getMissingRequiredDocs = () => {
+    const uploadedTypes = new Set([
+      ...attachments.map(att => att.document_type),
+      ...existingAttachments.map(att => att.document_type)
+    ]);
+
+    return requiredDocuments
+      .filter(doc => doc.required)
+      .filter(doc => !uploadedTypes.has(doc.code));
+  };
+
+  const missingRequiredDocs = getMissingRequiredDocs();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -76,7 +132,7 @@ export function PIBAttachments({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PIB_DOCUMENT_TYPES.map((type) => (
+                {relevantDocTypes.map((type) => (
                   <SelectItem key={type.value} value={type.value}>
                     {type.label}
                   </SelectItem>
@@ -181,14 +237,57 @@ export function PIBAttachments({
 
       {/* Required Documents Note */}
       {!isReadOnly && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-          <p className="font-medium mb-1">Required Documents for PIB:</p>
-          <ul className="list-disc list-inside space-y-0.5">
-            <li>Commercial Invoice</li>
-            <li>Packing List</li>
-            <li>Bill of Lading / Air Waybill</li>
-            <li>API Document (if applicable)</li>
+        <div className={cn(
+          "border rounded-lg p-3 text-xs",
+          missingRequiredDocs.length > 0
+            ? "bg-red-50 border-red-200 text-red-800"
+            : "bg-emerald-50 border-emerald-200 text-emerald-800"
+        )}>
+          <p className="font-medium mb-2 flex items-center gap-2">
+            {missingRequiredDocs.length > 0 ? (
+              <AlertCircle className="h-4 w-4" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            {transportMode 
+              ? `Required Documents for PIB (${transportMode}):` 
+              : 'Required Documents for PIB:'}
+          </p>
+          <ul className="space-y-1">
+            {requiredDocuments.map((doc) => {
+              const isUploaded = attachments.some(att => att.document_type === doc.code) ||
+                                existingAttachments.some(att => att.document_type === doc.code);
+              return (
+                <li key={doc.code} className="flex items-center gap-2">
+                  {isUploaded ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <div className="h-3.5 w-3.5 rounded-full border-2 border-current shrink-0" />
+                  )}
+                  <span className={isUploaded ? "line-through opacity-70" : ""}>{doc.label}</span>
+                  {doc.required && (
+                    <Badge variant="destructive" className="text-[10px] h-4 px-1.5">
+                      REQUIRED
+                    </Badge>
+                  )}
+                  {!doc.required && (
+                    <span className="text-[10px] text-muted-foreground">(optional)</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
+          {missingRequiredDocs.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-red-300 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Missing Required Documents:</p>
+                <p className="text-[11px] mt-0.5">
+                  {missingRequiredDocs.map(d => d.label).join(', ')}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { Skeleton } from '@/components/ui/skeleton';
 
-interface AuditLog {
+interface LocalAuditLog {
   id: string;
   documentType: 'PEB' | 'PIB';
   documentNumber: string;
@@ -94,9 +94,9 @@ export default function AuditLogPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [entityTypeFilter, setEntityTypeFilter] = useState<AuditEntityType | 'all'>('all');
   const [actionFilter, setActionFilter] = useState<AuditAction | 'all'>('all');
-  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [selectedLog, setSelectedLog] = useState<LocalAuditLog | null>(null);
+  const [logs, setLogs] = useState<AuditLogType[]>([]);
+  const [auditLogs, setAuditLogs] = useState<LocalAuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState(getAuditStats());
@@ -142,14 +142,14 @@ export default function AuditLogPage() {
         setAuditLogs([]);
         setTotalCount(0);
       } else {
-        const transformedLogs: AuditLog[] = (data || []).map((log) => ({
+        const transformedLogs: LocalAuditLog[] = (data || []).map((log) => ({
           id: log.id,
           documentType: (log.ref_type as 'PEB' | 'PIB') || 'PEB',
           documentNumber: log.metadata?.document_number || log.metadata?.entity_number || log.ref_id?.slice(0, 12) || 'N/A',
           action: formatAction(log.action),
           userEmail: log.user_id || 'system',
-          beforeData: log.metadata?.before_data || null,
-          afterData: log.metadata?.after_data || null,
+          beforeData: log.metadata?.before_data as Record<string, unknown> || null,
+          afterData: log.metadata?.after_data as Record<string, unknown> || null,
           ipAddress: log.ip_address || '-',
           createdAt: formatDateTime(log.created_at),
         }));

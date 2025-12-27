@@ -97,44 +97,39 @@ const generateMockManifests = (params: ManifestFetchParams): ManifestData[] => {
 };
 
 /**
- * Fetch manifest from CEISA API
+ * Fetch manifest from CEISA API via proxy edge function
  */
 export async function fetchManifestFromCEISA(params: ManifestFetchParams): Promise<ManifestFetchResult> {
-  if (!CEISA_API_URL || !CEISA_API_KEY) {
-    console.warn('CEISA API credentials not configured, using mock data');
-    return {
-      success: true,
-      data: generateMockManifests(params),
-      source: 'mock',
-    };
-  }
-
   try {
-    const queryParams = new URLSearchParams();
-    if (params.nomorAju) queryParams.append('nomorAju', params.nomorAju);
-    if (params.nomorManifest) queryParams.append('nomorManifest', params.nomorManifest);
-    if (params.npwpPenerima) queryParams.append('npwpPenerima', params.npwpPenerima);
-    if (params.kodeKantor) queryParams.append('kodeKantor', params.kodeKantor);
-    if (params.tanggalMulai) queryParams.append('tanggalMulai', params.tanggalMulai);
-    if (params.tanggalAkhir) queryParams.append('tanggalAkhir', params.tanggalAkhir);
+    // Build params object for the proxy
+    const proxyParams: Record<string, string> = {};
+    if (params.nomorAju) proxyParams.nomorAju = params.nomorAju;
+    if (params.nomorManifest) proxyParams.nomorManifest = params.nomorManifest;
+    if (params.npwpPenerima) proxyParams.npwpPenerima = params.npwpPenerima;
+    if (params.kodeKantor) proxyParams.kodeKantor = params.kodeKantor;
+    if (params.tanggalMulai) proxyParams.tanggalMulai = params.tanggalMulai;
+    if (params.tanggalAkhir) proxyParams.tanggalAkhir = params.tanggalAkhir;
 
-    const response = await fetch(`${CEISA_API_URL}/manifest/browse?${queryParams.toString()}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${CEISA_API_KEY}`,
-        'Content-Type': 'application/json',
+    // Call CEISA proxy edge function
+    const { data, error } = await supabase.functions.invoke('supabase-functions-ceisa-proxy', {
+      body: {
+        action: 'fetch',
+        endpoint: '/manifest/browse',
+        params: proxyParams,
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`CEISA API error: ${response.status} ${response.statusText}`);
+    if (error) {
+      throw new Error(`Edge function error: ${error.message}`);
     }
 
-    const result = await response.json();
+    if (!data || data.success === false) {
+      throw new Error(data?.error || 'CEISA API request failed');
+    }
     
     return {
       success: true,
-      data: result.data || [],
+      data: data.data || [],
       source: 'api',
     };
   } catch (error: any) {

@@ -66,6 +66,19 @@ export interface EDIArchiveEntry {
   archive_path: string;
 }
 
+export interface IncomingMessage {
+  id: string;
+  document_type: EDIDocumentType;
+  document_number: string;
+  direction: 'INCOMING';
+  status: EDIStatus;
+  ceisa_reference: string | null;
+  response_code: string | null;
+  response_message: string | null;
+  received_at: string | null;
+  created_at: string;
+}
+
 export const EDI_ERROR_CODES: Record<string, { field: string; message: string }> = {
   'E001': { field: 'exporter_npwp', message: 'Invalid NPWP format' },
   'E002': { field: 'importer_npwp', message: 'Invalid NPWP format' },

@@ -26,6 +26,9 @@ export * from './response-handler';
 // Error Parsing
 export * from './error-parser';
 
+// CEISA Submission
+export * from './ceisa-submit';
+
 // Queue Management
 export * from './outgoing';
 export * from './incoming';

@@ -155,45 +155,40 @@ const generateMockKendaraan = (params: KendaraanFetchParams): KendaraanData[] =>
 };
 
 /**
- * Fetch kendaraan from CEISA API
+ * Fetch kendaraan from CEISA API via proxy edge function
  */
 export async function fetchKendaraanFromCEISA(params: KendaraanFetchParams): Promise<KendaraanFetchResult> {
-  if (!CEISA_API_URL || !CEISA_API_KEY) {
-    console.warn('CEISA API credentials not configured, using mock data');
-    return {
-      success: true,
-      data: generateMockKendaraan(params),
-      source: 'mock',
-    };
-  }
-
   try {
-    const queryParams = new URLSearchParams();
-    if (params.nomorAju) queryParams.append('nomorAju', params.nomorAju);
-    if (params.nomorPib) queryParams.append('nomorPib', params.nomorPib);
-    if (params.nomorRangka) queryParams.append('nomorRangka', params.nomorRangka);
-    if (params.npwpImportir) queryParams.append('npwpImportir', params.npwpImportir);
-    if (params.kodeKantor) queryParams.append('kodeKantor', params.kodeKantor);
-    if (params.tanggalMulai) queryParams.append('tanggalMulai', params.tanggalMulai);
-    if (params.tanggalAkhir) queryParams.append('tanggalAkhir', params.tanggalAkhir);
+    // Build params object for the proxy
+    const proxyParams: Record<string, string> = {};
+    if (params.nomorAju) proxyParams.nomorAju = params.nomorAju;
+    if (params.nomorPib) proxyParams.nomorPib = params.nomorPib;
+    if (params.nomorRangka) proxyParams.nomorRangka = params.nomorRangka;
+    if (params.npwpImportir) proxyParams.npwpImportir = params.npwpImportir;
+    if (params.kodeKantor) proxyParams.kodeKantor = params.kodeKantor;
+    if (params.tanggalMulai) proxyParams.tanggalMulai = params.tanggalMulai;
+    if (params.tanggalAkhir) proxyParams.tanggalAkhir = params.tanggalAkhir;
 
-    const response = await fetch(`${CEISA_API_URL}/kendaraan/browse?${queryParams.toString()}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${CEISA_API_KEY}`,
-        'Content-Type': 'application/json',
+    // Call CEISA proxy edge function
+    const { data, error } = await supabase.functions.invoke('supabase-functions-ceisa-proxy', {
+      body: {
+        action: 'fetch',
+        endpoint: '/kendaraan/browse',
+        params: proxyParams,
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`CEISA API error: ${response.status} ${response.statusText}`);
+    if (error) {
+      throw new Error(`Edge function error: ${error.message}`);
     }
 
-    const result = await response.json();
+    if (!data || data.success === false) {
+      throw new Error(data?.error || 'CEISA API request failed');
+    }
     
     return {
       success: true,
-      data: result.data || [],
+      data: data.data || [],
       source: 'api',
     };
   } catch (error: any) {
@@ -261,7 +256,7 @@ export async function fetchAndSaveKendaraan(params: KendaraanFetchParams): Promi
     }));
 
     const { data, error } = await supabase
-      .from('ceisa_kendaraan')
+      .from('ceisa_vehicles')
       .upsert(documents, { onConflict: 'nomor_aju' })
       .select();
 

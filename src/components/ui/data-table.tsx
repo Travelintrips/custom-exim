@@ -41,7 +41,7 @@ interface FilterState {
   [key: string]: string;
 }
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   data,
   columns,
   keyField,

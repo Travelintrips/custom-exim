@@ -152,31 +152,85 @@ export async function checkCEISAConnectionMock(): Promise<CEISAConnectionStatus>
 }
 
 /**
- * Smart connection checker that uses mock in development
- * and real API in production
- * 
- * NOTE: Due to CORS restrictions, direct browser-to-CEISA API calls are blocked.
- * In production, this should go through a backend proxy (Edge Function).
- * For now, we use mock in development/browser environment.
+ * Check CEISA connection via Edge Function proxy (avoids CORS)
+ */
+export async function checkCEISAConnectionViaProxy(): Promise<CEISAConnectionStatus> {
+  const timestamp = new Date().toISOString();
+  const startTime = performance.now();
+  
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return {
+        connected: false,
+        httpStatus: null,
+        timestamp,
+        error: 'Supabase not configured',
+      };
+    }
+
+    // Get auth token using singleton supabase client
+    const { supabase } = await import('@/lib/supabase');
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/supabase-functions-ceisa-proxy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || supabaseKey}`,
+        'apikey': supabaseKey,
+      },
+      body: JSON.stringify({ action: 'health_check' }),
+    });
+
+    const responseTime = Math.round(performance.now() - startTime);
+    
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        connected: data.success === true,
+        httpStatus: response.status,
+        timestamp,
+        responseTime,
+        error: data.success ? undefined : data.error,
+      };
+    }
+    
+    return {
+      connected: false,
+      httpStatus: response.status,
+      timestamp,
+      responseTime,
+      error: `Proxy error: ${response.status}`,
+    };
+  } catch (error) {
+    const responseTime = Math.round(performance.now() - startTime);
+    return {
+      connected: false,
+      httpStatus: null,
+      timestamp,
+      responseTime,
+      error: error instanceof Error ? error.message : 'Connection failed',
+    };
+  }
+}
+
+/**
+ * Smart connection checker that uses Edge Function proxy for real API
+ * or mock for development/testing
  */
 export async function checkCEISAConnectionSmart(
   config?: CEISAConnectionConfig
 ): Promise<CEISAConnectionStatus> {
-  const isDev = import.meta.env.DEV;
   const hasMockFlag = import.meta.env.VITE_CEISA_USE_MOCK === 'true';
-  const hasApiKey = !!import.meta.env.VITE_CEISA_API_KEY;
   
-  // Always use mock in browser due to CORS restrictions
-  // Real API calls should go through Edge Function proxy
-  const isBrowser = typeof window !== 'undefined';
-  
-  // Use mock if:
-  // - Running in browser (CORS issues with direct API calls)
-  // - In dev mode without API key
-  // - Mock flag is set
-  if (isBrowser || (isDev && !hasApiKey) || hasMockFlag) {
+  // Use mock if flag is set
+  if (hasMockFlag) {
     return checkCEISAConnectionMock();
   }
   
-  return checkCEISAConnection(config);
+  // Use Edge Function proxy to avoid CORS
+  return checkCEISAConnectionViaProxy();
 }

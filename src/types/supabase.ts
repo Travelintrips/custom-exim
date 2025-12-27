@@ -544,6 +544,66 @@ export type Database = {
         }
         Relationships: []
       }
+      ceisa_submission_logs: {
+        Row: {
+          attempt_number: number | null
+          created_at: string | null
+          document_number: string | null
+          error_code: string | null
+          error_type: string | null
+          id: string
+          is_success: boolean | null
+          processed_by: string | null
+          ref_id: string
+          ref_type: string
+          registration_number: string | null
+          request_hash: string | null
+          request_xml: string | null
+          response_message: string | null
+          response_raw: string | null
+          response_status: string | null
+          retry_allowed: boolean | null
+        }
+        Insert: {
+          attempt_number?: number | null
+          created_at?: string | null
+          document_number?: string | null
+          error_code?: string | null
+          error_type?: string | null
+          id?: string
+          is_success?: boolean | null
+          processed_by?: string | null
+          ref_id: string
+          ref_type: string
+          registration_number?: string | null
+          request_hash?: string | null
+          request_xml?: string | null
+          response_message?: string | null
+          response_raw?: string | null
+          response_status?: string | null
+          retry_allowed?: boolean | null
+        }
+        Update: {
+          attempt_number?: number | null
+          created_at?: string | null
+          document_number?: string | null
+          error_code?: string | null
+          error_type?: string | null
+          id?: string
+          is_success?: boolean | null
+          processed_by?: string | null
+          ref_id?: string
+          ref_type?: string
+          registration_number?: string | null
+          request_hash?: string | null
+          request_xml?: string | null
+          response_message?: string | null
+          response_raw?: string | null
+          response_status?: string | null
+          retry_allowed?: boolean | null
+        }
+        Relationships: []
+      }
       ceisa_vehicles: {
         Row: {
           bahan_bakar: string | null
@@ -828,6 +888,48 @@ export type Database = {
         }
         Relationships: []
       }
+      customs_offices: {
+        Row: {
+          address: string | null
+          city: string | null
+          code: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          province: string | null
+          source: string | null
+          type: string
+          updated_at: string | null
+        }
+        Insert: {
+          address?: string | null
+          city?: string | null
+          code: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          province?: string | null
+          source?: string | null
+          type: string
+          updated_at?: string | null
+        }
+        Update: {
+          address?: string | null
+          city?: string | null
+          code?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          province?: string | null
+          source?: string | null
+          type?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       document_hashes: {
         Row: {
           created_at: string | null
@@ -920,11 +1022,14 @@ export type Database = {
           created_by: string | null
           description: string
           description_id: string | null
+          effective_date: string | null
           id: string
           is_active: boolean | null
           is_restricted: boolean | null
+          name: string | null
           pph_rate: number | null
           ppn_rate: number | null
+          source: string | null
           unit: string | null
           updated_at: string | null
           updated_by: string | null
@@ -936,11 +1041,14 @@ export type Database = {
           created_by?: string | null
           description: string
           description_id?: string | null
+          effective_date?: string | null
           id?: string
           is_active?: boolean | null
           is_restricted?: boolean | null
+          name?: string | null
           pph_rate?: number | null
           ppn_rate?: number | null
+          source?: string | null
           unit?: string | null
           updated_at?: string | null
           updated_by?: string | null
@@ -952,11 +1060,14 @@ export type Database = {
           created_by?: string | null
           description?: string
           description_id?: string | null
+          effective_date?: string | null
           id?: string
           is_active?: boolean | null
           is_restricted?: boolean | null
+          name?: string | null
           pph_rate?: number | null
           ppn_rate?: number | null
+          source?: string | null
           unit?: string | null
           updated_at?: string | null
           updated_by?: string | null
@@ -1126,38 +1237,50 @@ export type Database = {
         Row: {
           document_name: string
           document_type: string
+          file_hash: string | null
           file_name: string
           file_path: string
           file_size: number | null
           id: string
           mime_type: string | null
           peb_id: string
+          status: string | null
           uploaded_at: string | null
           uploaded_by: string | null
+          validated_at: string | null
+          validated_by: string | null
         }
         Insert: {
           document_name: string
           document_type: string
+          file_hash?: string | null
           file_name: string
           file_path: string
           file_size?: number | null
           id?: string
           mime_type?: string | null
           peb_id: string
+          status?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
         }
         Update: {
           document_name?: string
           document_type?: string
+          file_hash?: string | null
           file_name?: string
           file_path?: string
           file_size?: number | null
           id?: string
           mime_type?: string | null
           peb_id?: string
+          status?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
         }
         Relationships: [
           {
@@ -1175,7 +1298,11 @@ export type Database = {
           buyer_country: string | null
           buyer_id: string | null
           buyer_name: string | null
+          ceisa_last_error: string | null
           ceisa_response: string | null
+          ceisa_response_at: string | null
+          ceisa_retry_count: number | null
+          ceisa_submitted_at: string | null
           created_at: string | null
           created_by: string | null
           currency_code: string | null
@@ -1188,6 +1315,9 @@ export type Database = {
           destination_port_id: string | null
           destination_port_name: string | null
           document_number: string | null
+          eksportir_alamat: string | null
+          eksportir_nama: string | null
+          eksportir_npwp: string | null
           exchange_rate: number | null
           exporter_address: string | null
           exporter_id: string | null
@@ -1205,11 +1335,16 @@ export type Database = {
           locked: boolean | null
           locked_at: string | null
           locked_by: string | null
+          metadata: Json | null
+          negara_tujuan: string | null
           net_weight: number | null
+          nomor_aju: string | null
+          nomor_pendaftaran: string | null
           notes: string | null
           npe_date: string | null
           npe_number: string | null
           package_unit: string | null
+          pelabuhan_muat: string | null
           ppjk_id: string | null
           ppjk_name: string | null
           ppjk_npwp: string | null
@@ -1220,8 +1355,11 @@ export type Database = {
           submitted_at: string | null
           submitted_by: string | null
           synced_at: string | null
+          tanggal_aju: string | null
+          tanggal_pendaftaran: string | null
           total_fob_idr: number | null
           total_fob_value: number | null
+          total_nilai_fob: number | null
           total_packages: number | null
           transport_mode: string | null
           updated_at: string | null
@@ -1235,7 +1373,11 @@ export type Database = {
           buyer_country?: string | null
           buyer_id?: string | null
           buyer_name?: string | null
+          ceisa_last_error?: string | null
           ceisa_response?: string | null
+          ceisa_response_at?: string | null
+          ceisa_retry_count?: number | null
+          ceisa_submitted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1248,6 +1390,9 @@ export type Database = {
           destination_port_id?: string | null
           destination_port_name?: string | null
           document_number?: string | null
+          eksportir_alamat?: string | null
+          eksportir_nama?: string | null
+          eksportir_npwp?: string | null
           exchange_rate?: number | null
           exporter_address?: string | null
           exporter_id?: string | null
@@ -1265,11 +1410,16 @@ export type Database = {
           locked?: boolean | null
           locked_at?: string | null
           locked_by?: string | null
+          metadata?: Json | null
+          negara_tujuan?: string | null
           net_weight?: number | null
+          nomor_aju?: string | null
+          nomor_pendaftaran?: string | null
           notes?: string | null
           npe_date?: string | null
           npe_number?: string | null
           package_unit?: string | null
+          pelabuhan_muat?: string | null
           ppjk_id?: string | null
           ppjk_name?: string | null
           ppjk_npwp?: string | null
@@ -1280,8 +1430,11 @@ export type Database = {
           submitted_at?: string | null
           submitted_by?: string | null
           synced_at?: string | null
+          tanggal_aju?: string | null
+          tanggal_pendaftaran?: string | null
           total_fob_idr?: number | null
           total_fob_value?: number | null
+          total_nilai_fob?: number | null
           total_packages?: number | null
           transport_mode?: string | null
           updated_at?: string | null
@@ -1295,7 +1448,11 @@ export type Database = {
           buyer_country?: string | null
           buyer_id?: string | null
           buyer_name?: string | null
+          ceisa_last_error?: string | null
           ceisa_response?: string | null
+          ceisa_response_at?: string | null
+          ceisa_retry_count?: number | null
+          ceisa_submitted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1308,6 +1465,9 @@ export type Database = {
           destination_port_id?: string | null
           destination_port_name?: string | null
           document_number?: string | null
+          eksportir_alamat?: string | null
+          eksportir_nama?: string | null
+          eksportir_npwp?: string | null
           exchange_rate?: number | null
           exporter_address?: string | null
           exporter_id?: string | null
@@ -1325,11 +1485,16 @@ export type Database = {
           locked?: boolean | null
           locked_at?: string | null
           locked_by?: string | null
+          metadata?: Json | null
+          negara_tujuan?: string | null
           net_weight?: number | null
+          nomor_aju?: string | null
+          nomor_pendaftaran?: string | null
           notes?: string | null
           npe_date?: string | null
           npe_number?: string | null
           package_unit?: string | null
+          pelabuhan_muat?: string | null
           ppjk_id?: string | null
           ppjk_name?: string | null
           ppjk_npwp?: string | null
@@ -1340,8 +1505,11 @@ export type Database = {
           submitted_at?: string | null
           submitted_by?: string | null
           synced_at?: string | null
+          tanggal_aju?: string | null
+          tanggal_pendaftaran?: string | null
           total_fob_idr?: number | null
           total_fob_value?: number | null
+          total_nilai_fob?: number | null
           total_packages?: number | null
           transport_mode?: string | null
           updated_at?: string | null
@@ -1561,38 +1729,50 @@ export type Database = {
         Row: {
           document_name: string
           document_type: string
+          file_hash: string | null
           file_name: string
           file_path: string
           file_size: number | null
           id: string
           mime_type: string | null
           pib_id: string
+          status: string | null
           uploaded_at: string | null
           uploaded_by: string | null
+          validated_at: string | null
+          validated_by: string | null
         }
         Insert: {
           document_name: string
           document_type: string
+          file_hash?: string | null
           file_name: string
           file_path: string
           file_size?: number | null
           id?: string
           mime_type?: string | null
           pib_id: string
+          status?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
         }
         Update: {
           document_name?: string
           document_type?: string
+          file_hash?: string | null
           file_name?: string
           file_path?: string
           file_size?: number | null
           id?: string
           mime_type?: string | null
           pib_id?: string
+          status?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
         }
         Relationships: [
           {
@@ -1608,7 +1788,11 @@ export type Database = {
         Row: {
           bl_awb_date: string | null
           bl_awb_number: string | null
+          ceisa_last_error: string | null
           ceisa_response: string | null
+          ceisa_response_at: string | null
+          ceisa_retry_count: number | null
+          ceisa_submitted_at: string | null
           created_at: string | null
           created_by: string | null
           currency_code: string | null
@@ -1630,6 +1814,9 @@ export type Database = {
           importer_id: string | null
           importer_name: string | null
           importer_npwp: string | null
+          importir_alamat: string | null
+          importir_nama: string | null
+          importir_npwp: string | null
           incoterm_code: string | null
           incoterm_id: string | null
           insurance_value: number | null
@@ -1641,7 +1828,12 @@ export type Database = {
           locked: boolean | null
           locked_at: string | null
           locked_by: string | null
+          metadata: Json | null
+          nama_importir: string | null
           net_weight: number | null
+          nilai_cif: number | null
+          nomor_aju: string | null
+          nomor_pendaftaran: string | null
           notes: string | null
           package_unit: string | null
           ppjk_id: string | null
@@ -1660,9 +1852,13 @@ export type Database = {
           supplier_id: string | null
           supplier_name: string | null
           synced_at: string | null
+          tanggal_aju: string | null
+          tanggal_pendaftaran: string | null
+          total_bea_masuk: number | null
           total_bm: number | null
           total_cif_idr: number | null
           total_cif_value: number | null
+          total_nilai_pabean: number | null
           total_packages: number | null
           total_pph: number | null
           total_ppn: number | null
@@ -1673,11 +1869,16 @@ export type Database = {
           vessel_name: string | null
           voyage_number: string | null
           xml_content: string | null
+          xml_hash: string | null
         }
         Insert: {
           bl_awb_date?: string | null
           bl_awb_number?: string | null
+          ceisa_last_error?: string | null
           ceisa_response?: string | null
+          ceisa_response_at?: string | null
+          ceisa_retry_count?: number | null
+          ceisa_submitted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1699,6 +1900,9 @@ export type Database = {
           importer_id?: string | null
           importer_name?: string | null
           importer_npwp?: string | null
+          importir_alamat?: string | null
+          importir_nama?: string | null
+          importir_npwp?: string | null
           incoterm_code?: string | null
           incoterm_id?: string | null
           insurance_value?: number | null
@@ -1710,7 +1914,12 @@ export type Database = {
           locked?: boolean | null
           locked_at?: string | null
           locked_by?: string | null
+          metadata?: Json | null
+          nama_importir?: string | null
           net_weight?: number | null
+          nilai_cif?: number | null
+          nomor_aju?: string | null
+          nomor_pendaftaran?: string | null
           notes?: string | null
           package_unit?: string | null
           ppjk_id?: string | null
@@ -1729,9 +1938,13 @@ export type Database = {
           supplier_id?: string | null
           supplier_name?: string | null
           synced_at?: string | null
+          tanggal_aju?: string | null
+          tanggal_pendaftaran?: string | null
+          total_bea_masuk?: number | null
           total_bm?: number | null
           total_cif_idr?: number | null
           total_cif_value?: number | null
+          total_nilai_pabean?: number | null
           total_packages?: number | null
           total_pph?: number | null
           total_ppn?: number | null
@@ -1742,11 +1955,16 @@ export type Database = {
           vessel_name?: string | null
           voyage_number?: string | null
           xml_content?: string | null
+          xml_hash?: string | null
         }
         Update: {
           bl_awb_date?: string | null
           bl_awb_number?: string | null
+          ceisa_last_error?: string | null
           ceisa_response?: string | null
+          ceisa_response_at?: string | null
+          ceisa_retry_count?: number | null
+          ceisa_submitted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1768,6 +1986,9 @@ export type Database = {
           importer_id?: string | null
           importer_name?: string | null
           importer_npwp?: string | null
+          importir_alamat?: string | null
+          importir_nama?: string | null
+          importir_npwp?: string | null
           incoterm_code?: string | null
           incoterm_id?: string | null
           insurance_value?: number | null
@@ -1779,7 +2000,12 @@ export type Database = {
           locked?: boolean | null
           locked_at?: string | null
           locked_by?: string | null
+          metadata?: Json | null
+          nama_importir?: string | null
           net_weight?: number | null
+          nilai_cif?: number | null
+          nomor_aju?: string | null
+          nomor_pendaftaran?: string | null
           notes?: string | null
           package_unit?: string | null
           ppjk_id?: string | null
@@ -1798,9 +2024,13 @@ export type Database = {
           supplier_id?: string | null
           supplier_name?: string | null
           synced_at?: string | null
+          tanggal_aju?: string | null
+          tanggal_pendaftaran?: string | null
+          total_bea_masuk?: number | null
           total_bm?: number | null
           total_cif_idr?: number | null
           total_cif_value?: number | null
+          total_nilai_pabean?: number | null
           total_packages?: number | null
           total_pph?: number | null
           total_ppn?: number | null
@@ -1811,6 +2041,7 @@ export type Database = {
           vessel_name?: string | null
           voyage_number?: string | null
           xml_content?: string | null
+          xml_hash?: string | null
         }
         Relationships: [
           {
@@ -2047,12 +2278,18 @@ export type Database = {
         Row: {
           code: string
           country_code: string | null
+          country_id: string | null
           created_at: string | null
           created_by: string | null
           customs_office: string | null
+          customs_office_code: string | null
+          customs_office_id: string | null
           id: string
           is_active: boolean | null
           name: string
+          port_code: string | null
+          port_name: string | null
+          source: string | null
           type: string | null
           updated_at: string | null
           updated_by: string | null
@@ -2060,12 +2297,18 @@ export type Database = {
         Insert: {
           code: string
           country_code?: string | null
+          country_id?: string | null
           created_at?: string | null
           created_by?: string | null
           customs_office?: string | null
+          customs_office_code?: string | null
+          customs_office_id?: string | null
           id?: string
           is_active?: boolean | null
           name: string
+          port_code?: string | null
+          port_name?: string | null
+          source?: string | null
           type?: string | null
           updated_at?: string | null
           updated_by?: string | null
@@ -2073,17 +2316,38 @@ export type Database = {
         Update: {
           code?: string
           country_code?: string | null
+          country_id?: string | null
           created_at?: string | null
           created_by?: string | null
           customs_office?: string | null
+          customs_office_code?: string | null
+          customs_office_id?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
+          port_code?: string | null
+          port_name?: string | null
+          source?: string | null
           type?: string | null
           updated_at?: string | null
           updated_by?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ports_country_id_fkey"
+            columns: ["country_id"]
+            isOneToOne: false
+            referencedRelation: "countries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ports_customs_office_id_fkey"
+            columns: ["customs_office_id"]
+            isOneToOne: false
+            referencedRelation: "customs_offices"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ppjk: {
         Row: {
@@ -2218,11 +2482,13 @@ export type Database = {
           country_id: string | null
           created_at: string | null
           created_by: string | null
+          effective_date: string | null
           email: string | null
           id: string
           is_active: boolean | null
           name: string
           phone: string | null
+          source: string | null
           updated_at: string | null
           updated_by: string | null
         }
@@ -2233,11 +2499,13 @@ export type Database = {
           country_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          effective_date?: string | null
           email?: string | null
           id?: string
           is_active?: boolean | null
           name: string
           phone?: string | null
+          source?: string | null
           updated_at?: string | null
           updated_by?: string | null
         }
@@ -2248,11 +2516,13 @@ export type Database = {
           country_id?: string | null
           created_at?: string | null
           created_by?: string | null
+          effective_date?: string | null
           email?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
           phone?: string | null
+          source?: string | null
           updated_at?: string | null
           updated_by?: string | null
         }
@@ -2273,6 +2543,7 @@ export type Database = {
           doc_date: string | null
           doc_no: string | null
           doc_type: string | null
+          file_hash: string | null
           file_name: string | null
           file_size: number | null
           file_url: string | null
@@ -2281,7 +2552,9 @@ export type Database = {
           notes: string | null
           ref_id: string
           ref_type: string
+          status: string | null
           updated_at: string | null
+          validated_at: string | null
         }
         Insert: {
           created_at?: string | null
@@ -2289,6 +2562,7 @@ export type Database = {
           doc_date?: string | null
           doc_no?: string | null
           doc_type?: string | null
+          file_hash?: string | null
           file_name?: string | null
           file_size?: number | null
           file_url?: string | null
@@ -2297,7 +2571,9 @@ export type Database = {
           notes?: string | null
           ref_id: string
           ref_type: string
+          status?: string | null
           updated_at?: string | null
+          validated_at?: string | null
         }
         Update: {
           created_at?: string | null
@@ -2305,6 +2581,7 @@ export type Database = {
           doc_date?: string | null
           doc_no?: string | null
           doc_type?: string | null
+          file_hash?: string | null
           file_name?: string | null
           file_size?: number | null
           file_url?: string | null
@@ -2313,7 +2590,42 @@ export type Database = {
           notes?: string | null
           ref_id?: string
           ref_type?: string
+          status?: string | null
           updated_at?: string | null
+          validated_at?: string | null
+        }
+        Relationships: []
+      }
+      transport_modes: {
+        Row: {
+          code: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          requires_vessel: boolean | null
+          requires_voyage: boolean | null
+          source: string | null
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          requires_vessel?: boolean | null
+          requires_voyage?: boolean | null
+          source?: string | null
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          requires_vessel?: boolean | null
+          requires_voyage?: boolean | null
+          source?: string | null
         }
         Relationships: []
       }

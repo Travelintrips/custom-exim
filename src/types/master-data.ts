@@ -44,6 +44,7 @@ export interface Buyer extends BaseMasterData {
 }
 
 export interface HSCode extends BaseMasterData {
+  name: string | null;
   description: string;
   description_id: string | null;
   bm_rate: number;
@@ -187,12 +188,32 @@ export const masterDataConfig: Record<MasterDataType, {
     singularLabel: 'HS Code',
     fields: [
       { key: 'code', label: 'HS Code', type: 'text', required: true },
+      { key: 'name', label: 'Name', type: 'text' },
       { key: 'description', label: 'Description (EN)', type: 'textarea', required: true },
       { key: 'description_id', label: 'Description (ID)', type: 'textarea' },
       { key: 'bm_rate', label: 'BM Rate (%)', type: 'number' },
       { key: 'ppn_rate', label: 'PPN Rate (%)', type: 'number' },
       { key: 'pph_rate', label: 'PPh Rate (%)', type: 'number' },
-      { key: 'unit', label: 'Unit', type: 'text' },
+      { 
+        key: 'unit', 
+        label: 'Unit', 
+        type: 'select', 
+        options: [
+          { value: 'UNIT', label: 'UNIT' },
+          { value: 'PCS', label: 'PCS' },
+          { value: 'SET', label: 'SET' },
+          { value: 'KG', label: 'KG' },
+          { value: 'LTR', label: 'LTR' },
+          { value: 'MTR', label: 'MTR' },
+          { value: 'TON', label: 'TON' },
+          { value: 'DOZ', label: 'DOZ' },
+          { value: 'PAK', label: 'PAK' },
+          { value: 'BOX', label: 'BOX' },
+          { value: 'CTN', label: 'CTN' },
+          { value: 'M2', label: 'M2' },
+          { value: 'M3', label: 'M3' },
+        ]
+      },
       { key: 'is_restricted', label: 'Restricted', type: 'checkbox' },
     ],
   },

@@ -245,13 +245,10 @@ export const PIB_DOCUMENT_TYPES = [
   { value: 'OTHER', label: 'Other Document' },
 ];
 
-export const TRANSPORT_MODES = [
-  { value: 'SEA', label: 'Sea' },
-  { value: 'AIR', label: 'Air' },
-  { value: 'LAND', label: 'Land' },
-  { value: 'RAIL', label: 'Rail' },
-  { value: 'MULTIMODAL', label: 'Multimodal' },
-];
+// Transport modes are now fetched from database (transport_modes table)
+// Codes: SEA, AIR, LAND, RAIL, MULTI
+export const TRANSPORT_MODE_CODES = ['SEA', 'AIR', 'LAND', 'RAIL', 'MULTI'] as const;
+export type TransportModeCode = typeof TRANSPORT_MODE_CODES[number];
 
 export interface HSCodeTaxRates {
   bm_rate: number;

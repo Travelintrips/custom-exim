@@ -35,7 +35,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fetchAndSaveManifest, ManifestFetchParams } from '@/lib/edi/manifest-fetch';
 import { fetchAndSaveKendaraan, KendaraanFetchParams } from '@/lib/edi/kendaraan-fetch';
 import { fetchAndSavePKBSI, PKBSIFetchParams } from '@/lib/edi/pkbsi-fetch';
-import { syncCeisaDocuments, SyncAllResult, syncCeisaByTable } from '@/lib/edi/ceisa-sync-service';
+import { syncCeisaDocuments, SyncAllResult, syncCeisaByTable, testCeisaConnection } from '@/lib/edi/ceisa-sync-service';
 import { Badge } from '@/components/ui/badge';
 import { MobileCardView, ResponsiveDataView } from '@/components/ui/mobile-card-view';
 
@@ -305,23 +305,33 @@ export default function SingleCoreSystemPage() {
 
   const fetchKantorPabean = async () => {
     try {
+      // Fetch dari customs_offices table
       const { data, error } = await supabase
-        .from('ports')
-        .select('id, port_code, port_name, customs_office_code')
-        .order('port_name');
+        .from('customs_offices')
+        .select('id, code, name, type, city, province')
+        .eq('is_active', true)
+        .order('name');
 
       if (error) throw error;
 
       const kantorData: KantorPabean[] = (data || []).map((item: any) => ({
         id: item.id,
-        kode_kantor: item.customs_office_code || item.port_code,
-        nama_kantor: item.port_name,
-        kode_pelabuhan: item.port_code,
+        kode_kantor: item.code,
+        nama_kantor: `${item.name} ${item.city ? `(${item.city})` : ''}`,
+        kode_pelabuhan: item.code,
       }));
 
       setKantorList(kantorData);
+      
+      // Log untuk debugging
+      console.log('Kantor Pabean loaded:', kantorData.length);
+      
+      if (kantorData.length === 0) {
+        toast.warning('Data Kantor Pabean kosong. Jalankan migrasi database atau sync CEISA.');
+      }
     } catch (error) {
       console.error('Error fetching kantor pabean:', error);
+      toast.error('Gagal memuat Kantor Pabean');
     }
   };
 
@@ -799,6 +809,16 @@ export default function SingleCoreSystemPage() {
   const handleSyncAllCeisa = async () => {
     setSyncAllLoading(true);
     try {
+      // Test connection first
+      toast.info('Testing CEISA connection...');
+      const connectionTest = await testCeisaConnection();
+      
+      if (!connectionTest.success) {
+        toast.warning(`API CEISA tidak tersedia: ${connectionTest.message}. Menggunakan mock data.`);
+      } else {
+        toast.success('CEISA connected!');
+      }
+
       const result = await syncCeisaDocuments();
       setLastSyncResult(result);
       
@@ -806,7 +826,8 @@ export default function SingleCoreSystemPage() {
         toast.success(
           `Sync selesai! ${result.total_inserted} inserted, ${result.total_updated} updated (${result.duration_ms}ms)`
         );
-        // Refresh current tab data
+        // Refresh current tab data and kantor pabean
+        fetchKantorPabean();
         if (activeTab === 'manifes') fetchManifests();
         else if (activeTab === 'kendaraan') fetchKendaraan();
         else if (activeTab === 'pkbsi') fetchPKBSI();
@@ -1010,6 +1031,23 @@ export default function SingleCoreSystemPage() {
               </div>
             )}
             <Button
+              onClick={async () => {
+                const result = await testCeisaConnection();
+                if (result.success) {
+                  toast.success('✅ ' + result.message);
+                } else {
+                  toast.error('❌ ' + result.message);
+                }
+              }}
+              variant="outline"
+              size="sm"
+              className="text-xs sm:text-sm border-[#1E3A5F] text-[#1E3A5F] hover:bg-[#1E3A5F]/10"
+            >
+              <CheckCircle2 size={14} className="mr-1 sm:mr-1.5" />
+              <span className="hidden sm:inline">Test Connection</span>
+              <span className="sm:hidden">Test</span>
+            </Button>
+            <Button
               onClick={handleSyncAllCeisa}
               disabled={syncAllLoading}
               variant="default"
@@ -1167,7 +1205,7 @@ export default function SingleCoreSystemPage() {
                     <Input
                       id="pelabuhan"
                       placeholder="ID122"
-                      value=""
+                      defaultValue=""
                       disabled
                       className="bg-muted h-9 sm:h-10 text-sm"
                     />
@@ -1245,6 +1283,7 @@ export default function SingleCoreSystemPage() {
                             value={kantorPabean}
                             placeholder="040300 - KPU BEA DAN CUKAI TIPE A TJ PRIOK"
                             className="h-8"
+                            readOnly
                           />
                         </div>
                       </div>

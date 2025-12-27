@@ -6,6 +6,7 @@
 import { PEBDocument, PEBItem } from '@/types/peb';
 import { PIBDocument, PIBItem } from '@/types/pib';
 import { generateXMLHash, createSignedXML, generateTimestamp, generateMessageId } from './xml-hash';
+import { assertValidIncotermTransport } from '@/lib/validation/incoterm-transport-rules';
 
 // XML Escape utility
 function escapeXML(str: string | null | undefined): string {
@@ -40,6 +41,11 @@ function formatNPWP(npwp: string | null | undefined): string {
  * Map PEB Document to CEISA XML Format
  */
 export function mapPEBToXML(peb: PEBDocument): string {
+  // CRITICAL: Validate incoterm-transport combination before XML generation (CEISA SAFE)
+  if (peb.transport_mode && peb.incoterm_code) {
+    assertValidIncotermTransport(peb.transport_mode, peb.incoterm_code);
+  }
+
   const items = peb.items || [];
   const timestamp = generateTimestamp();
   const messageId = generateMessageId();
@@ -140,6 +146,11 @@ function mapPEBItemToXML(item: PEBItem): string {
  * Map PIB Document to CEISA XML Format
  */
 export function mapPIBToXML(pib: PIBDocument): string {
+  // CRITICAL: Validate incoterm-transport combination before XML generation (CEISA SAFE)
+  if (pib.transport_mode && pib.incoterm_code) {
+    assertValidIncotermTransport(pib.transport_mode, pib.incoterm_code);
+  }
+
   const items = pib.items || [];
   const timestamp = generateTimestamp();
   const messageId = generateMessageId();

@@ -24,6 +24,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRole } from "@/hooks/useRole";
@@ -43,6 +44,7 @@ interface MasterDataTableProps<T extends BaseMasterData> {
   onViewHistory: (item: T) => void;
   onImportExcel: () => void;
   onExportExcel: () => void;
+  onSyncCeisa?: () => void;
   renderExtraColumns?: (item: T) => React.ReactNode;
 }
 
@@ -56,6 +58,7 @@ export function MasterDataTable<T extends BaseMasterData>({
   onViewHistory,
   onImportExcel,
   onExportExcel,
+  onSyncCeisa,
   renderExtraColumns,
 }: MasterDataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -108,6 +111,17 @@ export function MasterDataTable<T extends BaseMasterData>({
         <div className="flex gap-2">
           {isAdmin && (
             <>
+              {onSyncCeisa && (dataType === 'hs_codes') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-[#1E3A5F] text-[#1E3A5F] hover:bg-[#1E3A5F]/10"
+                  onClick={onSyncCeisa}
+                >
+                  <RefreshCw size={14} />
+                  Sync CEISA
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

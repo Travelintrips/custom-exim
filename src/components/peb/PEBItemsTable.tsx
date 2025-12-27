@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +20,8 @@ import {
 import { Plus, Pencil, Trash2, AlertCircle } from 'lucide-react';
 import { PEBItem, calculateFOB } from '@/types/peb';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 
 interface PEBItemsTableProps {
   items: Partial<PEBItem>[];
@@ -28,11 +30,16 @@ interface PEBItemsTableProps {
   isReadOnly?: boolean;
 }
 
-const mockHSCodes = [
-  { id: '1', code: '8471300000', description: 'Laptop Computers', unit: 'UNIT' },
-  { id: '2', code: '8517120000', description: 'Mobile Phones', unit: 'UNIT' },
-  { id: '3', code: '6110110000', description: 'Wool Sweaters', unit: 'PCS' },
-];
+interface HSCode {
+  id: string;
+  code: string;
+  name: string | null;
+  description: string;
+  unit: string;
+  bm_rate: number;
+  ppn_rate: number;
+  pph_rate: number;
+}
 
 const mockPackaging = [
   { code: 'CTN', name: 'Carton' },
@@ -65,6 +72,32 @@ export function PEBItemsTable({ items, onItemsChange, exchangeRate, isReadOnly }
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [currentItem, setCurrentItem] = useState<Partial<PEBItem>>(emptyItem);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [hsCodes, setHsCodes] = useState<HSCode[]>([]);
+  const [loadingHSCodes, setLoadingHSCodes] = useState(false);
+
+  // Fetch HS Codes from database
+  useEffect(() => {
+    fetchHSCodes();
+  }, []);
+
+  const fetchHSCodes = async () => {
+    try {
+      setLoadingHSCodes(true);
+      const { data, error } = await supabase
+        .from('hs_codes')
+        .select('id, code, name, description, unit, bm_rate, ppn_rate, pph_rate')
+        .eq('is_active', true)
+        .order('code');
+
+      if (error) throw error;
+      setHsCodes((data || []) as HSCode[]);
+    } catch (error) {
+      console.error('Error fetching HS codes:', error);
+      toast.error('Failed to load HS codes');
+    } finally {
+      setLoadingHSCodes(false);
+    }
+  };
 
   const openAddDialog = () => {
     setEditingIndex(null);
@@ -91,12 +124,12 @@ export function PEBItemsTable({ items, onItemsChange, exchangeRate, isReadOnly }
   const handleChange = (field: keyof PEBItem, value: unknown) => {
     let updatedItem = { ...currentItem, [field]: value };
     
-    // Auto-calculate values
+    // Auto-fill from HS Code database
     if (field === 'hs_code_id') {
-      const hsCode = mockHSCodes.find(h => h.id === value);
+      const hsCode = hsCodes.find(h => h.id === value);
       if (hsCode) {
         updatedItem.hs_code = hsCode.code;
-        updatedItem.product_description = hsCode.description;
+        updatedItem.product_description = hsCode.name || hsCode.description;
         updatedItem.quantity_unit = hsCode.unit;
       }
     }
@@ -125,10 +158,23 @@ export function PEBItemsTable({ items, onItemsChange, exchangeRate, isReadOnly }
     
     if (!currentItem.hs_code) newErrors.hs_code = 'HS Code is required';
     if (!currentItem.product_description) newErrors.product_description = 'Description is required';
-    if (!currentItem.quantity || currentItem.quantity <= 0) newErrors.quantity = 'Quantity must be > 0';
-    if (!currentItem.unit_price || currentItem.unit_price <= 0) newErrors.unit_price = 'Unit price must be > 0';
-    if (!currentItem.net_weight || currentItem.net_weight <= 0) newErrors.net_weight = 'Net weight is required';
-    if (!currentItem.gross_weight || currentItem.gross_weight <= 0) newErrors.gross_weight = 'Gross weight is required';
+    if (!currentItem.quantity || currentItem.quantity <= 0) newErrors.quantity = 'Quantity must be greater than 0';
+    if (!currentItem.quantity_unit) {
+      newErrors.quantity_unit = 'Unit is required. HS Code must have a valid unit.';
+    }
+    if (!currentItem.unit_price || currentItem.unit_price <= 0) newErrors.unit_price = 'Unit price must be greater than 0';
+    
+    // Weight validation
+    if (!currentItem.net_weight || currentItem.net_weight <= 0) {
+      newErrors.net_weight = 'Net weight harus lebih dari 0';
+    }
+    if (!currentItem.gross_weight || currentItem.gross_weight <= 0) {
+      newErrors.gross_weight = 'Gross weight harus lebih dari 0';
+    }
+    // Gross weight must be >= Net weight
+    if (currentItem.gross_weight && currentItem.net_weight && currentItem.gross_weight < currentItem.net_weight) {
+      newErrors.gross_weight = `Gross weight (${currentItem.gross_weight}) tidak boleh kurang dari Net weight (${currentItem.net_weight})`;
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -251,12 +297,12 @@ export function PEBItemsTable({ items, onItemsChange, exchangeRate, isReadOnly }
                 <Label className="text-xs">HS Code <span className="text-red-500">*</span></Label>
                 <Select value={currentItem.hs_code_id || ''} onValueChange={(v) => handleChange('hs_code_id', v)}>
                   <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder="Select HS Code" />
+                    <SelectValue placeholder={loadingHSCodes ? "Loading..." : "Select HS Code"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockHSCodes.map((hs) => (
+                    {hsCodes.map((hs) => (
                       <SelectItem key={hs.id} value={hs.id}>
-                        <span className="font-mono">{hs.code}</span> - {hs.description}
+                        <span className="font-mono">{hs.code}</span> - {hs.name || hs.description}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -312,12 +358,19 @@ export function PEBItemsTable({ items, onItemsChange, exchangeRate, isReadOnly }
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Unit</Label>
+                <Label className="text-xs">Unit <span className="text-red-500">*</span></Label>
                 <Input
                   value={currentItem.quantity_unit || ''}
-                  onChange={(e) => handleChange('quantity_unit', e.target.value)}
-                  className="h-8 text-sm"
+                  disabled
+                  className="h-8 text-sm bg-muted/30"
+                  placeholder="Auto-filled from HS Code"
                 />
+                {!currentItem.quantity_unit && currentItem.hs_code_id && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    Warning: No unit in HS Code
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Unit Price (FOB) <span className="text-red-500">*</span></Label>

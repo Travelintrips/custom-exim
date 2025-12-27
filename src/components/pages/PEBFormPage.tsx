@@ -20,8 +20,15 @@ import { PEBItemsTable } from '@/components/peb/PEBItemsTable';
 import { PEBAttachments } from '@/components/peb/PEBAttachments';
 import { PEBReviewSummary } from '@/components/peb/PEBReviewSummary';
 import { PEBXMLPreview } from '@/components/peb/PEBXMLPreview';
-import { PEBItem, PEBDocument, TRANSPORT_MODES, validatePEBDocument } from '@/types/peb';
+import { PEBItem, PEBDocument, validatePEBDocument } from '@/types/peb';
 import { useRole } from '@/hooks/useRole';
+import { 
+  INCOTERM_TRANSPORT_RULES, 
+  isValidIncotermForTransport, 
+  getIncotermTransportError,
+  isSeaOnlyIncoterm,
+  getAllowedIncoterms 
+} from '@/lib/validation/incoterm-transport-rules';
 import { 
   create_export_peb, 
   submit_peb,
@@ -59,11 +66,29 @@ interface PPJK {
   npwp: string | null;
 }
 
+interface CustomsOffice {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+}
+
 interface Port {
   id: string;
   code: string;
   name: string;
   type: string | null;
+  country_code: string | null;
+  customs_office_id: string | null;
+  country?: { code: string; name: string } | null;
+}
+
+interface TransportMode {
+  id: string;
+  code: string;
+  name: string;
+  requires_vessel: boolean;
+  requires_voyage: boolean;
 }
 
 interface Incoterm {
@@ -184,7 +209,9 @@ export default function PEBFormPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [ppjkList, setPpjkList] = useState<PPJK[]>([]);
+  const [customsOffices, setCustomsOffices] = useState<CustomsOffice[]>([]);
   const [ports, setPorts] = useState<Port[]>([]);
+  const [transportModes, setTransportModes] = useState<TransportMode[]>([]);
   const [incoterms, setIncoterms] = useState<Incoterm[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [loadingMasterData, setLoadingMasterData] = useState(true);
@@ -236,10 +263,24 @@ export default function PEBFormPage() {
         setPpjkList((ppjkData || []) as PPJK[]);
       }
 
+      // Fetch customs offices
+      const { data: customsOfficesData, error: customsOfficesError } = await supabase
+        .from('customs_offices')
+        .select('id, code, name, type')
+        .eq('is_active', true)
+        .order('name');
+
+      if (customsOfficesError) {
+        console.error('Error fetching customs offices:', customsOfficesError);
+        toast.error('Failed to load customs offices');
+      } else {
+        setCustomsOffices((customsOfficesData || []) as CustomsOffice[]);
+      }
+
       // Fetch ports - only active ports
       const { data: portsData, error: portsError } = await supabase
         .from('ports')
-        .select('id, code, name, type')
+        .select('id, code, name, type, country_code, customs_office_id, country:countries(code, name)')
         .eq('is_active', true)
         .order('name');
 
@@ -247,7 +288,21 @@ export default function PEBFormPage() {
         console.error('Error fetching ports:', portsError);
         toast.error('Failed to load ports');
       } else {
-        setPorts((portsData || []) as Port[]);
+        setPorts((portsData || []) as unknown as Port[]);
+      }
+
+      // Fetch transport modes
+      const { data: transportModesData, error: transportModesError } = await supabase
+        .from('transport_modes')
+        .select('id, code, name, requires_vessel, requires_voyage')
+        .eq('is_active', true)
+        .order('name');
+
+      if (transportModesError) {
+        console.error('Error fetching transport modes:', transportModesError);
+        toast.error('Failed to load transport modes');
+      } else {
+        setTransportModes((transportModesData || []) as TransportMode[]);
       }
 
       // Fetch incoterms - only active incoterms
@@ -423,10 +478,73 @@ export default function PEBFormPage() {
       if (!formData.incoterm_id) errors.push('Incoterm is required');
       if (!formData.currency_id) errors.push('Currency is required');
       if (!formData.transport_mode) errors.push('Transport mode is required');
+      
+      // Validate vessel/voyage for SEA/MULTI transport modes
+      const selectedMode = transportModes.find(m => m.code === formData.transport_mode);
+      if (selectedMode?.requires_vessel && !formData.vessel_name) {
+        errors.push('Vessel name is required for ' + selectedMode.name);
+      }
+      if (selectedMode?.requires_voyage && !formData.voyage_number) {
+        errors.push('Voyage number is required for ' + selectedMode.name);
+      }
+      
+      // CRITICAL: Validate incoterm-transport mode combination (CEISA/DJBC compliance)
+      const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+      if (selectedIncoterm && formData.transport_mode) {
+        if (!isValidIncotermForTransport(formData.transport_mode, selectedIncoterm.code)) {
+          const errorMsg = getIncotermTransportError(formData.transport_mode, selectedIncoterm.code);
+          errors.push(errorMsg || `Incoterm ${selectedIncoterm.code} tidak valid untuk transport mode ${formData.transport_mode}`);
+          // Log invalid attempt for audit
+          console.warn('[AUDIT] Invalid incoterm-transport combination attempted:', {
+            transport_mode: formData.transport_mode,
+            incoterm: selectedIncoterm.code,
+          });
+        }
+      }
+      
+      // Validate freight/insurance for CIF/CIP incoterms
+      if (selectedIncoterm?.code === 'CIF' || selectedIncoterm?.code === 'CIP') {
+        if (!formData.freight_value || formData.freight_value <= 0) {
+          errors.push('Freight value is required for ' + selectedIncoterm.code);
+        }
+        if (!formData.insurance_value || formData.insurance_value <= 0) {
+          errors.push('Insurance value is required for ' + selectedIncoterm.code);
+        }
+      }
     }
 
     if (currentStep === 3) {
       if (items.length === 0) errors.push('At least one item is required');
+    }
+
+    if (currentStep === 4) {
+      // Validate required documents based on transport mode
+      const uploadedTypes = new Set([
+        ...attachments.map(att => att.document_type),
+      ]);
+
+      // Always required
+      if (!uploadedTypes.has('INVOICE')) {
+        errors.push('Commercial Invoice is required');
+      }
+      if (!uploadedTypes.has('PACKING_LIST')) {
+        errors.push('Packing List is required');
+      }
+
+      // Transport-specific required documents
+      if (formData.transport_mode === 'AIR') {
+        if (!uploadedTypes.has('AWB')) {
+          errors.push('Air Waybill is required for AIR transport');
+        }
+      } else if (formData.transport_mode === 'SEA') {
+        if (!uploadedTypes.has('BL')) {
+          errors.push('Bill of Lading is required for SEA transport');
+        }
+      }
+
+      if (errors.length > 0) {
+        toast.error('Required supporting documents are incomplete');
+      }
     }
 
     if (errors.length > 0) {
@@ -444,6 +562,51 @@ export default function PEBFormPage() {
 
   const goToPrevStep = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
+  };
+
+  // Check if Submit button should be enabled (comprehensive validation)
+  const canSubmit = (): boolean => {
+    // Exporter required
+    if (!formData.exporter_id) return false;
+    
+    // Buyer required
+    if (!formData.buyer_id && !formData.buyer_name) return false;
+    
+    // Transport vs Incoterm validation
+    if (formData.transport_mode && formData.incoterm_code) {
+      if (formData.transport_mode === 'AIR' && ['FOB', 'CFR', 'CIF', 'FAS'].includes(formData.incoterm_code)) {
+        return false;
+      }
+      if (!isValidIncotermForTransport(formData.transport_mode, formData.incoterm_code)) {
+        return false;
+      }
+    }
+    
+    // Goods required
+    if (items.length === 0) return false;
+    
+    // Validate goods items
+    const hasInvalidItems = items.some(item => {
+      if (!item.hs_code) return true;
+      if (!item.net_weight || item.net_weight <= 0) return true;
+      if (item.gross_weight !== undefined && item.net_weight !== undefined && item.gross_weight < item.net_weight) return true;
+      if (!item.quantity_unit) return true;
+      return false;
+    });
+    if (hasInvalidItems) return false;
+    
+    // Documents validation
+    const uploadedDocTypes = attachments.map(att => att.document_type);
+    if (!uploadedDocTypes.includes('INVOICE')) return false;
+    if (!uploadedDocTypes.includes('PACKING_LIST')) return false;
+    
+    if (formData.transport_mode === 'AIR' && !uploadedDocTypes.includes('AWB')) return false;
+    if (formData.transport_mode === 'SEA' && !uploadedDocTypes.includes('BL')) return false;
+    
+    // No validation errors
+    if (validationErrors.length > 0) return false;
+    
+    return true;
   };
 
   const handleSaveDraft = async () => {
@@ -530,26 +693,85 @@ export default function PEBFormPage() {
   };
 
   const handleSubmit = async () => {
-    // Validate exporter_id
+    // === VALIDATION ENGINE: validateBeforeSubmit ===
+    
+    const clientErrors: string[] = [];
+    
+    // === DOCUMENT INFO VALIDATION ===
     if (!formData.exporter_id) {
-      toast.error('Please select an exporter');
-      return;
+      clientErrors.push('Exporter NPWP wajib diisi');
+    }
+    if (!formData.buyer_id && !formData.buyer_name) {
+      clientErrors.push('Buyer wajib diisi');
     }
 
-    // Validate goods (Validation Gate: Block if goods empty)
+    // === TRANSPORT vs INCOTERM VALIDATION ===
+    if (formData.transport_mode && formData.incoterm_code) {
+      if (formData.transport_mode === 'AIR' && ['FOB', 'CFR', 'CIF', 'FAS'].includes(formData.incoterm_code)) {
+        clientErrors.push(`Incoterm ${formData.incoterm_code} tidak valid untuk transport AIR`);
+      }
+      if (!isValidIncotermForTransport(formData.transport_mode, formData.incoterm_code)) {
+        const errorMsg = getIncotermTransportError(formData.transport_mode, formData.incoterm_code);
+        if (errorMsg) clientErrors.push(errorMsg);
+      }
+    }
+
+    // === GOODS VALIDATION ===
     if (items.length === 0) {
-      toast.error('Validation failed: At least one goods item is required');
-      return;
+      clientErrors.push('Minimal satu item barang wajib diisi');
     }
 
-    // Validate FOB (Validation Gate: Block if FOB = 0)
     const totalFOB = items.reduce((sum, item) => sum + (item.fob_value || 0), 0);
     if (totalFOB === 0) {
-      toast.error('Validation failed: Total FOB value cannot be 0');
+      clientErrors.push('Total FOB value tidak boleh 0');
+    }
+
+    // Validate each goods item
+    items.forEach((item, index) => {
+      const itemNum = index + 1;
+      
+      if (!item.hs_code) {
+        clientErrors.push(`Item ${itemNum}: HS Code wajib diisi`);
+      }
+      if (!item.net_weight || item.net_weight <= 0) {
+        clientErrors.push(`Item ${itemNum}: Net weight harus lebih dari 0`);
+      }
+      if (item.gross_weight !== undefined && item.net_weight !== undefined && item.gross_weight < item.net_weight) {
+        clientErrors.push(`Item ${itemNum}: Gross weight tidak boleh kurang dari Net weight`);
+      }
+      if (!item.quantity_unit) {
+        clientErrors.push(`Item ${itemNum}: Unit wajib diisi (dari HS Code)`);
+      }
+    });
+
+    // === SUPPORTING DOCUMENTS VALIDATION ===
+    const uploadedDocTypes = attachments.map(att => att.document_type);
+    
+    if (!uploadedDocTypes.includes('INVOICE')) {
+      clientErrors.push('Dokumen wajib belum lengkap: Commercial Invoice');
+    }
+    if (!uploadedDocTypes.includes('PACKING_LIST')) {
+      clientErrors.push('Dokumen wajib belum lengkap: Packing List');
+    }
+    
+    if (formData.transport_mode === 'AIR') {
+      if (!uploadedDocTypes.includes('AWB')) {
+        clientErrors.push('Air Waybill wajib untuk transport AIR');
+      }
+    } else if (formData.transport_mode === 'SEA') {
+      if (!uploadedDocTypes.includes('BL')) {
+        clientErrors.push('Bill of Lading wajib untuk transport SEA');
+      }
+    }
+
+    // === CHECK VALIDATION RESULT ===
+    if (clientErrors.length > 0) {
+      setValidationErrors(clientErrors);
+      clientErrors.forEach(err => toast.error(err));
       return;
     }
 
-    // Build document for validation
+    // Build document for additional validation
     const doc: PEBDocument = {
       id: '',
       document_number: null,
@@ -649,17 +871,39 @@ export default function PEBFormPage() {
       const submitResult = await submit_peb(createResult.peb_id);
 
       if (submitResult.success) {
+        // Show detailed success message
+        const submitTime = new Date().toLocaleString('id-ID', { 
+          timeZone: 'Asia/Jakarta',
+          dateStyle: 'long',
+          timeStyle: 'medium'
+        });
+        
         toast.success(
-          `PEB submitted successfully! 
-           Status: ${submitResult.status}
-           XML Hash: ${submitResult.xml_hash?.substring(0, 16)}...
-           Document is now locked.`
+          `PEB berhasil disubmit!
+           
+           📄 Status: ${submitResult.status}
+           🔐 XML Hash: ${submitResult.xml_hash?.substring(0, 16)}...
+           🕐 Submit Time: ${submitTime}
+           🔒 Document locked & ready for CEISA`,
+          { duration: 8000 }
         );
         navigate('/peb');
       } else {
-        // If submit fails, the document remains as draft
-        toast.error(submitResult.errors.join(', ') || 'Failed to submit PEB');
-        setValidationErrors(submitResult.errors);
+        // Show detailed error message (CEISA raw error if available)
+        const errorMessages = submitResult.errors || [];
+        
+        errorMessages.forEach((err, idx) => {
+          toast.error(
+            `[${idx + 1}/${errorMessages.length}] ${err}`,
+            { duration: 10000 }
+          );
+        });
+        
+        if (errorMessages.length === 0) {
+          toast.error('Failed to submit PEB - unknown error');
+        }
+        
+        setValidationErrors(errorMessages);
         // Still navigate to the PEB detail page since draft was created
         navigate(`/peb/${createResult.peb_id}`);
       }
@@ -846,40 +1090,122 @@ export default function PEBFormPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Customs Office <span className="text-red-500">*</span></Label>
-                    <Select value={formData.customs_office_id} onValueChange={(v) => handleChange('customs_office_id', v)}>
+                    <Select value={formData.customs_office_id} onValueChange={(v) => {
+                      const office = customsOffices.find(o => o.id === v);
+                      handleChange('customs_office_id', v);
+                      if (office) {
+                        handleChange('customs_office_code', office.code);
+                        handleChange('customs_office_name', office.name);
+                      }
+                    }}>
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Select customs office" />
                       </SelectTrigger>
                       <SelectContent>
-                        {ports.filter(p => p.type === 'CUSTOMS' || p.code?.startsWith('ID')).map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>
+                        {customsOffices.map((office) => (
+                          <SelectItem key={office.id} value={office.id}>
+                            {office.code} - {office.name} ({office.type})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Transport Mode <span className="text-red-500">*</span></Label>
+                    <Select value={formData.transport_mode} onValueChange={(v) => {
+                      handleChange('transport_mode', v);
+                      // Clear vessel/voyage if not required
+                      const mode = transportModes.find(m => m.code === v);
+                      if (mode && !mode.requires_vessel) {
+                        handleChange('vessel_name', '');
+                        handleChange('voyage_number', '');
+                      }
+                      // Validate existing incoterm selection against new transport mode
+                      const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+                      if (selectedIncoterm && !isValidIncotermForTransport(v, selectedIncoterm.code)) {
+                        // Clear invalid incoterm
+                        handleChange('incoterm_id', '');
+                        handleChange('incoterm_code', '');
+                        toast.warning(`Incoterm ${selectedIncoterm.code} tidak valid untuk ${mode?.name || v}. Silakan pilih incoterm lain.`);
+                      }
+                    }}>
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="Select transport mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {transportModes.map((m) => (
+                          <SelectItem key={m.id} value={m.code}>{m.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Loading Port <span className="text-red-500">*</span></Label>
-                    <Select value={formData.loading_port_id} onValueChange={(v) => handleChange('loading_port_id', v)}>
+                    <Select value={formData.loading_port_id} onValueChange={(v) => {
+                      const port = ports.find(p => p.id === v);
+                      handleChange('loading_port_id', v);
+                      if (port) {
+                        handleChange('loading_port_code', port.code);
+                        handleChange('loading_port_name', port.name);
+                      }
+                    }}>
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Select loading port" />
                       </SelectTrigger>
                       <SelectContent>
-                        {ports.filter(p => p.code?.startsWith('ID')).map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>
-                        ))}
+                        {/* Filter Indonesian ports based on transport mode and customs office */}
+                        {ports
+                          .filter(p => {
+                            // Only Indonesian ports for loading
+                            if (!p.country_code?.startsWith('ID') && p.country_code !== 'ID') return false;
+                            // Filter by transport mode
+                            const selectedMode = formData.transport_mode;
+                            if (selectedMode === 'SEA' && p.type !== 'SEA') return false;
+                            if (selectedMode === 'AIR' && p.type !== 'AIR') return false;
+                            return true;
+                          })
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.code} - {p.name} ({p.type})
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs">Destination Port <span className="text-red-500">*</span></Label>
-                    <Select value={formData.destination_port_id} onValueChange={(v) => handleChange('destination_port_id', v)}>
+                    <Select value={formData.destination_port_id} onValueChange={(v) => {
+                      const port = ports.find(p => p.id === v);
+                      handleChange('destination_port_id', v);
+                      if (port) {
+                        handleChange('destination_port_code', port.code);
+                        handleChange('destination_port_name', port.name);
+                        // Auto-set destination country
+                        if (port.country) {
+                          handleChange('destination_country', port.country.name);
+                        }
+                      }
+                    }}>
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Select destination" />
                       </SelectTrigger>
                       <SelectContent>
-                        {ports.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.code} - {p.name}</SelectItem>
-                        ))}
+                        {/* Filter foreign ports based on transport mode */}
+                        {ports
+                          .filter(p => {
+                            // Only non-Indonesian ports for destination
+                            if (p.country_code?.startsWith('ID') || p.country_code === 'ID') return false;
+                            // Filter by transport mode
+                            const selectedMode = formData.transport_mode;
+                            if (selectedMode === 'SEA' && p.type !== 'SEA') return false;
+                            if (selectedMode === 'AIR' && p.type !== 'AIR') return false;
+                            return true;
+                          })
+                          .map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.code} - {p.name} ({p.country?.name || p.country_code})
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -887,86 +1213,208 @@ export default function PEBFormPage() {
                     <Label className="text-xs">Destination Country</Label>
                     <Input
                       value={formData.destination_country}
-                      onChange={(e) => handleChange('destination_country', e.target.value)}
-                      className="h-8 text-sm"
-                      placeholder="e.g. United States"
+                      disabled
+                      className="h-8 text-sm bg-muted/30"
+                      placeholder="Auto-filled from destination port"
                     />
                   </div>
                 </div>
 
                 <h2 className="text-sm font-semibold border-b pb-2 pt-4">Transport Details</h2>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Transport Mode <span className="text-red-500">*</span></Label>
-                    <Select value={formData.transport_mode} onValueChange={(v) => handleChange('transport_mode', v)}>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TRANSPORT_MODES.map((m) => (
-                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Vessel Name</Label>
-                    <Input
-                      value={formData.vessel_name}
-                      onChange={(e) => handleChange('vessel_name', e.target.value)}
-                      className="h-8 text-sm"
-                      placeholder="e.g. MV Pacific Star"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Voyage Number</Label>
-                    <Input
-                      value={formData.voyage_number}
-                      onChange={(e) => handleChange('voyage_number', e.target.value)}
-                      className="h-8 text-sm"
-                      placeholder="e.g. V123"
-                    />
-                  </div>
+                  {(() => {
+                    const selectedMode = transportModes.find(m => m.code === formData.transport_mode);
+                    const requiresVessel = selectedMode?.requires_vessel ?? (formData.transport_mode === 'SEA' || formData.transport_mode === 'MULTI');
+                    const requiresVoyage = selectedMode?.requires_voyage ?? (formData.transport_mode === 'SEA' || formData.transport_mode === 'MULTI');
+                    return (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">
+                            Vessel Name {requiresVessel && <span className="text-red-500">*</span>}
+                          </Label>
+                          <Input
+                            value={formData.vessel_name}
+                            onChange={(e) => handleChange('vessel_name', e.target.value)}
+                            className="h-8 text-sm"
+                            placeholder={requiresVessel ? "Required - e.g. MV Pacific Star" : "Not required"}
+                            disabled={!requiresVessel}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">
+                            Voyage Number {requiresVoyage && <span className="text-red-500">*</span>}
+                          </Label>
+                          <Input
+                            value={formData.voyage_number}
+                            onChange={(e) => handleChange('voyage_number', e.target.value)}
+                            className="h-8 text-sm"
+                            placeholder={requiresVoyage ? "Required - e.g. V123" : "Not required"}
+                            disabled={!requiresVoyage}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Transport Mode Info</Label>
+                          <div className="h-8 flex items-center text-xs text-muted-foreground">
+                            {selectedMode ? (
+                              <span className="bg-muted px-2 py-1 rounded">
+                                {selectedMode.name} ({selectedMode.code})
+                              </span>
+                            ) : (
+                              'Select transport mode above'
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <h2 className="text-sm font-semibold border-b pb-2 pt-4">Trade Terms</h2>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Incoterm <span className="text-red-500">*</span></Label>
-                    <Select value={formData.incoterm_id} onValueChange={(v) => handleChange('incoterm_id', v)}>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select incoterm" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {incoterms.map((i) => (
-                          <SelectItem key={i.id} value={i.id}>{i.code} - {i.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Currency <span className="text-red-500">*</span></Label>
-                    <Select value={formData.currency_id} onValueChange={(v) => handleChange('currency_id', v)}>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select currency" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currencies.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>{c.code} - {c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Exchange Rate (IDR)</Label>
-                    <Input
-                      type="number"
-                      value={formData.exchange_rate}
-                      onChange={(e) => handleChange('exchange_rate', parseFloat(e.target.value) || 0)}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+                  const requiresFreightInsurance = selectedIncoterm?.code === 'CIF' || selectedIncoterm?.code === 'CIP';
+                  const allowedIncotermCodes = getAllowedIncoterms(formData.transport_mode || '');
+                  const incotermError = selectedIncoterm && formData.transport_mode 
+                    ? getIncotermTransportError(formData.transport_mode, selectedIncoterm.code) 
+                    : null;
+                  
+                  return (
+                    <>
+                      {/* Incoterm-Transport validation error */}
+                      {incotermError && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                          <div className="text-xs text-red-700">
+                            <p className="font-medium">Kombinasi Tidak Valid</p>
+                            <p>{incotermError}</p>
+                          </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Incoterm <span className="text-red-500">*</span></Label>
+                          <Select 
+                            value={formData.incoterm_id} 
+                            onValueChange={(v) => {
+                              const incoterm = incoterms.find(i => i.id === v);
+                              if (incoterm && formData.transport_mode) {
+                                // Validate before setting
+                                if (!isValidIncotermForTransport(formData.transport_mode, incoterm.code)) {
+                                  toast.error(getIncotermTransportError(formData.transport_mode, incoterm.code));
+                                  return;
+                                }
+                              }
+                              handleChange('incoterm_id', v);
+                              if (incoterm) {
+                                handleChange('incoterm_code', incoterm.code);
+                              }
+                            }}
+                          >
+                            <SelectTrigger className={`h-8 text-sm ${incotermError ? 'border-red-500' : ''}`}>
+                              <SelectValue placeholder="Select incoterm" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {incoterms.map((i) => {
+                                const isAllowed = !formData.transport_mode || allowedIncotermCodes.includes(i.code);
+                                const isSeaOnly = isSeaOnlyIncoterm(i.code);
+                                return (
+                                  <SelectItem 
+                                    key={i.id} 
+                                    value={i.id}
+                                    disabled={!isAllowed}
+                                    className={!isAllowed ? 'opacity-50' : ''}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span>{i.code} - {i.name}</span>
+                                      {isSeaOnly && (
+                                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded">SEA ONLY</span>
+                                      )}
+                                      {!isAllowed && (
+                                        <span className="text-[10px] text-red-500">(tidak valid)</span>
+                                      )}
+                                    </div>
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                          {formData.transport_mode && !formData.transport_mode.includes('SEA') && (
+                            <p className="text-[10px] text-muted-foreground">
+                              FOB, CFR, CIF, FAS hanya untuk transport laut (SEA)
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Currency <span className="text-red-500">*</span></Label>
+                          <Select value={formData.currency_id} onValueChange={(v) => {
+                            const currency = currencies.find(c => c.id === v);
+                            handleChange('currency_id', v);
+                            if (currency) {
+                              handleChange('currency_code', currency.code);
+                              if (currency.exchange_rate) {
+                                handleChange('exchange_rate', currency.exchange_rate);
+                              }
+                            }
+                          }}>
+                            <SelectTrigger className="h-8 text-sm">
+                              <SelectValue placeholder="Select currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {currencies.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>
+                                  {c.code} - {c.name} {c.exchange_rate ? `(Rp ${c.exchange_rate.toLocaleString()})` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Exchange Rate (IDR)</Label>
+                          <Input
+                            type="number"
+                            value={formData.exchange_rate}
+                            onChange={(e) => handleChange('exchange_rate', parseFloat(e.target.value) || 0)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+                      {requiresFreightInsurance && (
+                        <div className="grid grid-cols-2 gap-4 mt-4 p-3 bg-amber-50 border border-amber-200 rounded">
+                          <div className="col-span-2">
+                            <p className="text-xs text-amber-700 mb-2">
+                              <AlertCircle className="inline h-3 w-3 mr-1" />
+                              {selectedIncoterm?.code} incoterm requires Freight and Insurance values
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">
+                              Freight Value <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              type="number"
+                              value={formData.freight_value}
+                              onChange={(e) => handleChange('freight_value', parseFloat(e.target.value) || 0)}
+                              className="h-8 text-sm"
+                              placeholder="Required for CIF/CIP"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs">
+                              Insurance Value <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              type="number"
+                              value={formData.insurance_value}
+                              onChange={(e) => handleChange('insurance_value', parseFloat(e.target.value) || 0)}
+                              className="h-8 text-sm"
+                              placeholder="Required for CIF/CIP"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -984,6 +1432,7 @@ export default function PEBFormPage() {
               <PEBAttachments
                 attachments={attachments}
                 onAttachmentsChange={setAttachments}
+                transportMode={formData.transport_mode}
               />
             )}
 
@@ -1019,7 +1468,7 @@ export default function PEBFormPage() {
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={isSaving || validationErrors.length > 0}
+                disabled={isSaving || !canSubmit()}
                 className="gap-1.5"
               >
                 <Send size={14} />

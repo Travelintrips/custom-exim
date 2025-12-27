@@ -37,6 +37,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/lib/supabase';
+import { syncHSCodes } from '@/lib/edi/ceisa-sync-service';
 
 const tabConfig: { value: MasterDataType; label: string }[] = [
   { value: 'companies', label: 'Companies' },
@@ -290,7 +291,7 @@ export default function MasterDataPage() {
             // Only allow is_active field update for referenced records
             const criticalFields = ['code', 'npwp', 'type'];
             const hasChangedCriticalFields = criticalFields.some(
-              field => formData[field] !== (selectedItem as Record<string, unknown>)[field]
+              field => formData[field] !== (selectedItem as unknown as Record<string, unknown>)[field]
             );
             
             if (hasChangedCriticalFields) {
@@ -348,6 +349,32 @@ export default function MasterDataPage() {
 
   const handleExport = () => {
     toast.info('Export started...');
+  };
+
+  const handleSyncCeisa = async () => {
+    if (activeTab !== 'hs_codes') {
+      toast.error('Sync CEISA only available for HS Codes');
+      return;
+    }
+
+    toast.info('Syncing HS Codes from CEISA...');
+    
+    try {
+      const result = await syncHSCodes();
+      
+      if (result.success) {
+        toast.success(
+          `Sync selesai! ${result.inserted} inserted, ${result.updated} updated`,
+          { duration: 5000 }
+        );
+        // Refresh data
+        fetchData(activeTab);
+      } else {
+        toast.error(`Sync failed: ${result.errors.join(', ')}`);
+      }
+    } catch (error: any) {
+      toast.error('Gagal sync CEISA: ' + error.message);
+    }
   };
 
   const renderExtraColumns = (item: BaseMasterData) => {
@@ -416,6 +443,7 @@ export default function MasterDataPage() {
                     onViewHistory={handleViewHistory}
                     onImportExcel={() => setImportOpen(true)}
                     onExportExcel={handleExport}
+                    onSyncCeisa={tab.value === 'hs_codes' ? handleSyncCeisa : undefined}
                     renderExtraColumns={renderExtraColumns}
                   />
                 </TabsContent>
@@ -431,7 +459,7 @@ export default function MasterDataPage() {
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
         onSubmit={handleFormSubmit}
-        initialData={selectedItem as Record<string, unknown> | null}
+        initialData={selectedItem as unknown as Record<string, unknown> | null}
         mode={formMode}
       />
 

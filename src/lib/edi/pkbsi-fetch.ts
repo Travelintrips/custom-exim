@@ -131,45 +131,40 @@ const generateMockPKBSI = (params: PKBSIFetchParams): PKBSIData[] => {
 };
 
 /**
- * Fetch PKBSI from CEISA API
+ * Fetch PKBSI from CEISA API via proxy edge function
  */
 export async function fetchPKBSIFromCEISA(params: PKBSIFetchParams): Promise<PKBSIFetchResult> {
-  if (!CEISA_API_URL || !CEISA_API_KEY) {
-    console.warn('CEISA API credentials not configured, using mock data');
-    return {
-      success: true,
-      data: generateMockPKBSI(params),
-      source: 'mock',
-    };
-  }
-
   try {
-    const queryParams = new URLSearchParams();
-    if (params.nomorAju) queryParams.append('nomorAju', params.nomorAju);
-    if (params.nomorDokumen) queryParams.append('nomorDokumen', params.nomorDokumen);
-    if (params.npwpImportir) queryParams.append('npwpImportir', params.npwpImportir);
-    if (params.kategoriLartas) queryParams.append('kategoriLartas', params.kategoriLartas);
-    if (params.statusLartas) queryParams.append('statusLartas', params.statusLartas);
-    if (params.tanggalMulai) queryParams.append('tanggalMulai', params.tanggalMulai);
-    if (params.tanggalAkhir) queryParams.append('tanggalAkhir', params.tanggalAkhir);
+    // Build params object for the proxy
+    const proxyParams: Record<string, string> = {};
+    if (params.nomorAju) proxyParams.nomorAju = params.nomorAju;
+    if (params.nomorDokumen) proxyParams.nomorDokumen = params.nomorDokumen;
+    if (params.npwpImportir) proxyParams.npwpImportir = params.npwpImportir;
+    if (params.kategoriLartas) proxyParams.kategoriLartas = params.kategoriLartas;
+    if (params.statusLartas) proxyParams.statusLartas = params.statusLartas;
+    if (params.tanggalMulai) proxyParams.tanggalMulai = params.tanggalMulai;
+    if (params.tanggalAkhir) proxyParams.tanggalAkhir = params.tanggalAkhir;
 
-    const response = await fetch(`${CEISA_API_URL}/pkbsi/browse?${queryParams.toString()}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${CEISA_API_KEY}`,
-        'Content-Type': 'application/json',
+    // Call CEISA proxy edge function
+    const { data, error } = await supabase.functions.invoke('supabase-functions-ceisa-proxy', {
+      body: {
+        action: 'fetch',
+        endpoint: '/pkbsi/browse',
+        params: proxyParams,
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`CEISA API error: ${response.status} ${response.statusText}`);
+    if (error) {
+      throw new Error(`Edge function error: ${error.message}`);
     }
 
-    const result = await response.json();
+    if (!data || data.success === false) {
+      throw new Error(data?.error || 'CEISA API request failed');
+    }
     
     return {
       success: true,
-      data: result.data || [],
+      data: data.data || [],
       source: 'api',
     };
   } catch (error: any) {

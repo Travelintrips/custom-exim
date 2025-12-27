@@ -48,6 +48,16 @@ const selectOptions: Record<string, { value: string; label: string }[]> = {
     { value: 'AIR', label: 'Airport' },
     { value: 'LAND', label: 'Land Border' },
   ],
+  'hs_codes.unit': [
+    { value: 'UNIT', label: 'UNIT' },
+    { value: 'PCS', label: 'PCS' },
+    { value: 'SET', label: 'SET' },
+    { value: 'KG', label: 'KG' },
+    { value: 'LTR', label: 'LTR' },
+    { value: 'MTR', label: 'MTR' },
+    { value: 'BOX', label: 'BOX' },
+    { value: 'CTN', label: 'CTN' },
+  ],
 };
 
 export function MasterDataForm({

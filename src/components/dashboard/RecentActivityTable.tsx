@@ -87,7 +87,7 @@ export function RecentActivityTable() {
         .limit(10);
 
       if (auditError) {
-        console.warn('Could not fetch audit logs:', auditError.message);
+        console.warn('Could not fetch audit logs:', auditError);
         // Fallback: fetch recent documents directly
         await fetchFromDocuments();
         return;

@@ -1,12 +1,45 @@
 /**
  * CEISA Sync Service
  * Synchronizes data from CEISA API to Supabase tables
+ * Uses Edge Function proxy to bypass CORS restrictions
  */
 
 import { supabase } from '@/lib/supabase';
 
 const CEISA_API_URL = import.meta.env.VITE_CEISA_API_URL;
 const CEISA_API_KEY = import.meta.env.VITE_CEISA_API_KEY;
+const USE_EDGE_PROXY = true; // Always use edge function for browser CORS
+
+// ========== CONNECTION TEST ==========
+
+export async function testCeisaConnection(): Promise<{
+  success: boolean;
+  message: string;
+  details?: any;
+}> {
+  try {
+    // Try to call a lightweight endpoint
+    const result = await callCeisaApi<any>('/health');
+    
+    if (result.success) {
+      return {
+        success: true,
+        message: 'Koneksi ke API CEISA berhasil',
+        details: result.data,
+      };
+    } else {
+      return {
+        success: false,
+        message: result.error || 'Gagal terhubung ke API CEISA',
+      };
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `Error: ${error.message}`,
+    };
+  }
+}
 
 // ========== TYPES ==========
 
@@ -37,6 +70,30 @@ interface CeisaApiResponse<T> {
 // ========== API HELPERS ==========
 
 async function callCeisaApi<T>(endpoint: string, params?: Record<string, string>): Promise<CeisaApiResponse<T>> {
+  // Use Edge Function proxy to bypass CORS
+  if (USE_EDGE_PROXY) {
+    try {
+      const { data, error } = await supabase.functions.invoke('supabase-functions-ceisa-proxy', {
+        body: { endpoint, params },
+      });
+
+      if (error) {
+        console.error(`CEISA Proxy Error (${endpoint}):`, error);
+        return { success: false, data: [], error: error.message };
+      }
+
+      if (!data.success) {
+        return { success: false, data: [], error: data.error || 'Unknown error' };
+      }
+
+      return { success: true, data: Array.isArray(data.data) ? data.data : [] };
+    } catch (error: any) {
+      console.error(`CEISA API Error (${endpoint}):`, error);
+      return { success: false, data: [], error: error.message };
+    }
+  }
+
+  // Direct API call (for non-browser environments)
   if (!CEISA_API_URL || !CEISA_API_KEY) {
     console.warn(`CEISA API not configured for endpoint: ${endpoint}`);
     return { success: false, data: [], error: 'API not configured' };
@@ -71,17 +128,15 @@ async function callCeisaApi<T>(endpoint: string, params?: Record<string, string>
 function transformPibDocument(raw: any): any {
   return {
     nomor_aju: raw.nomorAju || raw.nomor_aju,
-    tanggal_aju: raw.tanggalAju || raw.tanggal_aju,
-    nomor_pendaftaran: raw.nomorPendaftaran || raw.nomor_pendaftaran,
-    tanggal_pendaftaran: raw.tanggalPendaftaran || raw.tanggal_pendaftaran,
-    importir_npwp: raw.importirNpwp || raw.npwp_importir,
-    importir_nama: raw.importirNama || raw.nama_importir,
-    importir_alamat: raw.importirAlamat || raw.alamat_importir,
-    total_nilai_pabean: raw.totalNilaiPabean || raw.total_nilai_pabean || 0,
-    total_bea_masuk: raw.totalBeaMasuk || raw.total_bea_masuk || 0,
-    total_ppn: raw.totalPpn || raw.total_ppn || 0,
-    total_pph: raw.totalPph || raw.total_pph || 0,
-    status: raw.status || 'SUBMITTED',
+    registration_number: raw.nomorPendaftaran || raw.nomor_pendaftaran || null,
+    registration_date: raw.tanggalPendaftaran || raw.tanggal_pendaftaran || null,
+    importer_npwp: raw.importirNpwp || raw.npwp_importir || null,
+    importer_name: raw.importirNama || raw.nama_importir || null,
+    importer_address: raw.importirAlamat || raw.alamat_importir || null,
+    total_cif_value: parseFloat(raw.totalNilaiPabean || raw.total_nilai_pabean || 0),
+    total_bm: parseFloat(raw.totalBeaMasuk || raw.total_bea_masuk || 0),
+    total_ppn: parseFloat(raw.totalPpn || raw.total_ppn || 0),
+    total_pph: parseFloat(raw.totalPph || raw.total_pph || 0),
     metadata: raw,
     synced_at: new Date().toISOString(),
     source: 'CEISA',
@@ -91,16 +146,14 @@ function transformPibDocument(raw: any): any {
 function transformPebDocument(raw: any): any {
   return {
     nomor_aju: raw.nomorAju || raw.nomor_aju,
-    tanggal_aju: raw.tanggalAju || raw.tanggal_aju,
-    nomor_pendaftaran: raw.nomorPendaftaran || raw.nomor_pendaftaran,
-    tanggal_pendaftaran: raw.tanggalPendaftaran || raw.tanggal_pendaftaran,
-    eksportir_npwp: raw.eksportirNpwp || raw.npwp_eksportir,
-    eksportir_nama: raw.eksportirNama || raw.nama_eksportir,
-    eksportir_alamat: raw.eksportirAlamat || raw.alamat_eksportir,
-    total_nilai_fob: raw.totalNilaiFob || raw.total_nilai_fob || 0,
-    negara_tujuan: raw.negaraTujuan || raw.negara_tujuan,
-    pelabuhan_muat: raw.pelabuhanMuat || raw.pelabuhan_muat,
-    status: raw.status || 'SUBMITTED',
+    registration_number: raw.nomorPendaftaran || raw.nomor_pendaftaran || null,
+    registration_date: raw.tanggalPendaftaran || raw.tanggal_pendaftaran || null,
+    exporter_npwp: raw.eksportirNpwp || raw.npwp_eksportir || null,
+    exporter_name: raw.eksportirNama || raw.nama_eksportir || null,
+    exporter_address: raw.eksportirAlamat || raw.alamat_eksportir || null,
+    total_fob_value: parseFloat(raw.totalNilaiFob || raw.total_nilai_fob || 0),
+    destination_country: raw.negaraTujuan || raw.negara_tujuan || null,
+    loading_port_name: raw.pelabuhanMuat || raw.pelabuhan_muat || null,
     metadata: raw,
     synced_at: new Date().toISOString(),
     source: 'CEISA',
@@ -241,14 +294,19 @@ async function upsertToTable(
   }
 
   try {
-    // Check existing records
-    const nomorAjuList = data.map(d => d.nomor_aju);
-    const { data: existing } = await supabase
-      .from(tableName)
-      .select('nomor_aju')
-      .in('nomor_aju', nomorAjuList);
+    // Check existing records using the correct conflict column
+    const keyList = data.map(d => d[conflictColumn]).filter(Boolean);
+    
+    let existingSet = new Set<string>();
+    
+    if (keyList.length > 0) {
+      const { data: existing } = await supabase
+        .from(tableName)
+        .select(conflictColumn)
+        .in(conflictColumn, keyList);
 
-    const existingSet = new Set((existing || []).map((e: any) => e.nomor_aju));
+      existingSet = new Set((existing || []).map((e: any) => e[conflictColumn]));
+    }
 
     // Perform upsert
     const { data: result, error } = await supabase
@@ -259,9 +317,8 @@ async function upsertToTable(
     if (error) {
       errors.push(`${tableName}: ${error.message}`);
     } else {
-      const resultCount = result?.length || 0;
       data.forEach(d => {
-        if (existingSet.has(d.nomor_aju)) {
+        if (existingSet.has(d[conflictColumn])) {
           updated++;
         } else {
           inserted++;
@@ -675,6 +732,106 @@ export async function syncMonitoring(): Promise<SyncResult> {
   };
 }
 
+// Sync Customs Offices (Master Data)
+export async function syncCustomsOffices(): Promise<SyncResult> {
+  const syncedAt = new Date().toISOString();
+  const errors: string[] = [];
+  let source: 'CEISA' | 'MOCK' = 'CEISA';
+  let rawData: any[] = [];
+
+  const apiResult = await callCeisaApi<any>('/master/customs-offices');
+  
+  if (apiResult.success && apiResult.data.length > 0) {
+    rawData = apiResult.data;
+  } else {
+    source = 'MOCK';
+    // Generate mock data based on migration seed
+    rawData = [
+      { code: 'IDCGK', name: 'KPU Bea Cukai Soekarno-Hatta', type: 'AIR', city: 'Tangerang', province: 'Banten' },
+      { code: 'IDTPP', name: 'KPU Bea Cukai Tanjung Priok', type: 'SEA', city: 'Jakarta', province: 'DKI Jakarta' },
+      { code: 'IDSUB', name: 'KPU Bea Cukai Tanjung Perak', type: 'SEA', city: 'Surabaya', province: 'Jawa Timur' },
+      { code: 'IDJKT', name: 'Kanwil DJBC Jakarta', type: 'MIXED', city: 'Jakarta', province: 'DKI Jakarta' },
+      { code: 'IDBPN', name: 'KPU Bea Cukai Balikpapan', type: 'SEA', city: 'Balikpapan', province: 'Kalimantan Timur' },
+      { code: 'IDMES', name: 'KPU Bea Cukai Belawan', type: 'SEA', city: 'Medan', province: 'Sumatera Utara' },
+      { code: 'IDDPS', name: 'KPU Bea Cukai Ngurah Rai', type: 'AIR', city: 'Denpasar', province: 'Bali' },
+      { code: 'IDUPG', name: 'KPU Bea Cukai Makassar', type: 'SEA', city: 'Makassar', province: 'Sulawesi Selatan' },
+    ];
+    if (apiResult.error) errors.push(`API: ${apiResult.error} - Using seed data`);
+  }
+
+  const transformedData = rawData.map((item: any) => ({
+    code: item.code || item.kode,
+    name: item.name || item.nama,
+    type: item.type || item.jenis || 'MIXED',
+    city: item.city || item.kota || null,
+    province: item.province || item.provinsi || null,
+    address: item.address || item.alamat || null,
+    is_active: item.is_active !== undefined ? item.is_active : true,
+    source: source === 'CEISA' ? 'ceisa_sync' : 'seed_djbc',
+  }));
+
+  const upsertResult = await upsertToTable('customs_offices', transformedData, 'code');
+
+  return {
+    success: errors.length === 0 && upsertResult.errors.length === 0,
+    table: 'customs_offices',
+    inserted: upsertResult.inserted,
+    updated: upsertResult.updated,
+    errors: [...errors, ...upsertResult.errors],
+    synced_at: syncedAt,
+    source,
+  };
+}
+
+// Sync HS Codes (Master Data)
+export async function syncHSCodes(): Promise<SyncResult> {
+  const syncedAt = new Date().toISOString();
+  const errors: string[] = [];
+  let source: 'CEISA' | 'MOCK' = 'CEISA';
+  let rawData: any[] = [];
+
+  const apiResult = await callCeisaApi<any>('/master/hs-codes');
+  
+  if (apiResult.success && apiResult.data.length > 0) {
+    rawData = apiResult.data;
+  } else {
+    source = 'MOCK';
+    // Generate mock HS codes data
+    rawData = [
+      { code: '0101210000', name: 'Live horses, pure-bred breeding animals', description: 'Kuda murni untuk bibit', bm_rate: 0, ppn_rate: 11, pph_rate: 2.5, unit: 'HEAD' },
+      { code: '0201100000', name: 'Carcasses and half-carcasses of bovine animals, fresh or chilled', description: 'Karkas sapi, segar atau dingin', bm_rate: 5, ppn_rate: 11, pph_rate: 2.5, unit: 'KG' },
+      { code: '0301110000', name: 'Live ornamental fish - Freshwater', description: 'Ikan hias air tawar hidup', bm_rate: 0, ppn_rate: 11, pph_rate: 2.5, unit: 'KG' },
+      { code: '0401200000', name: 'Milk and cream, not concentrated, fat content > 1% but ≤ 6%', description: 'Susu dan krim, tidak dipekatkan', bm_rate: 5, ppn_rate: 11, pph_rate: 2.5, unit: 'LTR' },
+      { code: '0713320000', name: 'Small red (adzuki) beans, dried shelled', description: 'Kacang merah kecil kering tanpa kulit', bm_rate: 0, ppn_rate: 11, pph_rate: 2.5, unit: 'KG' },
+    ];
+    if (apiResult.error) errors.push(`API: ${apiResult.error} - Using sample data`);
+  }
+
+  const transformedData = rawData.map((item: any) => ({
+    code: item.code || item.hs_code,
+    name: item.name || item.description?.substring(0, 255) || null,
+    description: item.description || item.name || '',
+    description_id: item.description_id || item.description || null,
+    bm_rate: item.bm_rate !== undefined ? item.bm_rate : 0,
+    ppn_rate: item.ppn_rate !== undefined ? item.ppn_rate : 11,
+    pph_rate: item.pph_rate !== undefined ? item.pph_rate : 0,
+    unit: item.unit || item.satuan || 'KG',
+    is_active: item.is_active !== undefined ? item.is_active : true,
+  }));
+
+  const upsertResult = await upsertToTable('hs_codes', transformedData, 'code');
+
+  return {
+    success: errors.length === 0 && upsertResult.errors.length === 0,
+    table: 'hs_codes',
+    inserted: upsertResult.inserted,
+    updated: upsertResult.updated,
+    errors: [...errors, ...upsertResult.errors],
+    synced_at: syncedAt,
+    source,
+  };
+}
+
 // Helper to create notifications after sync
 async function createStatusChangeNotifications(data: any[]) {
   try {
@@ -730,7 +887,7 @@ export async function syncCeisaDocuments(): Promise<SyncAllResult> {
   const results: SyncResult[] = [];
 
   // Run all syncs in parallel
-  const [pibResult, pebResult, manifestResult, pkbsiResult, kendaraanResult, monitoringResult] = 
+  const [pibResult, pebResult, manifestResult, pkbsiResult, kendaraanResult, monitoringResult, customsOfficesResult, hsCodesResult] = 
     await Promise.all([
       syncPibDocuments(),
       syncPebDocuments(),
@@ -738,9 +895,11 @@ export async function syncCeisaDocuments(): Promise<SyncAllResult> {
       syncPkbsi(),
       syncKendaraan(),
       syncMonitoring(),
+      syncCustomsOffices(),
+      syncHSCodes(),
     ]);
 
-  results.push(pibResult, pebResult, manifestResult, pkbsiResult, kendaraanResult, monitoringResult);
+  results.push(pibResult, pebResult, manifestResult, pkbsiResult, kendaraanResult, monitoringResult, customsOfficesResult, hsCodesResult);
 
   const total_inserted = results.reduce((sum, r) => sum + r.inserted, 0);
   const total_updated = results.reduce((sum, r) => sum + r.updated, 0);
@@ -774,6 +933,10 @@ export async function syncCeisaByTable(tableName: string): Promise<SyncResult> {
       return syncMonitoring();
     case 'ceisa_vehicles':
       return syncKendaraan();
+    case 'customs_offices':
+      return syncCustomsOffices();
+    case 'hs_codes':
+      return syncHSCodes();
     default:
       return {
         success: false,

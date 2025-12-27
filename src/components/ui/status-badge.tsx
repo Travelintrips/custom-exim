@@ -43,6 +43,21 @@ const statusConfig: Record<
 export function StatusBadge({ status, className, showIcon = false }: StatusBadgeProps) {
   const config = statusConfig[status];
 
+  // Handle undefined status gracefully
+  if (!config) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-medium",
+          "bg-slate-50 text-slate-600 border-slate-300",
+          className
+        )}
+      >
+        {status || 'Unknown'}
+      </span>
+    );
+  }
+
   return (
     <span
       className={cn(

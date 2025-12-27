@@ -21,9 +21,16 @@ import { PIBAttachments } from '@/components/pib/PIBAttachments';
 import { PIBReviewSummary } from '@/components/pib/PIBReviewSummary';
 import { PIBXMLPreview } from '@/components/pib/PIBXMLPreview';
 import { PIBTaxBreakdown } from '@/components/pib/PIBTaxBreakdown';
-import { PIBItem, PIBDocument, TRANSPORT_MODES, validatePIBDocument, calculateTotalPIBTax } from '@/types/pib';
+import { PIBItem, PIBDocument, validatePIBDocument, calculateTotalPIBTax } from '@/types/pib';
 import { useRole } from '@/hooks/useRole';
 import { supabase } from '@/lib/supabase';
+import { 
+  INCOTERM_TRANSPORT_RULES, 
+  isValidIncotermForTransport, 
+  getIncotermTransportError,
+  isSeaOnlyIncoterm,
+  getAllowedIncoterms 
+} from '@/lib/validation/incoterm-transport-rules';
 
 // Types for master data
 interface Company {
@@ -55,6 +62,15 @@ interface Port {
   code: string;
   name: string;
   type: string;
+  country_code?: string;
+}
+
+interface TransportMode {
+  id: string;
+  code: string;
+  name: string;
+  requires_vessel: boolean;
+  requires_voyage: boolean;
 }
 
 interface Incoterm {
@@ -192,17 +208,19 @@ export default function PIBFormPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [ppjkList, setPpjkList] = useState<PPJK[]>([]);
   const [ports, setPorts] = useState<Port[]>([]);
+  const [transportModes, setTransportModes] = useState<TransportMode[]>([]);
   const [incoterms, setIncoterms] = useState<Incoterm[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
 
   // Fetch master data from Supabase
   const fetchMasterData = useCallback(async () => {
     try {
-      const [companiesRes, suppliersRes, ppjkRes, portsRes, incotermsRes, currenciesRes] = await Promise.all([
+      const [companiesRes, suppliersRes, ppjkRes, portsRes, transportModesRes, incotermsRes, currenciesRes] = await Promise.all([
         supabase.from('companies').select('id, code, name, npwp, address').eq('is_active', true).order('name'),
         supabase.from('suppliers').select('id, code, name, country, address').eq('is_active', true).order('name'),
         supabase.from('ppjk').select('id, code, name, npwp').eq('is_active', true).order('name'),
-        supabase.from('ports').select('id, code, name, type').eq('is_active', true).order('name'),
+        supabase.from('ports').select('id, code, name, type, country_code').eq('is_active', true).order('name'),
+        supabase.from('transport_modes').select('id, code, name, requires_vessel, requires_voyage').eq('is_active', true).order('name'),
         supabase.from('incoterms').select('id, code, name').eq('is_active', true).order('code'),
         supabase.from('currencies').select('id, code, name, exchange_rate').eq('is_active', true).order('code'),
       ]);
@@ -211,6 +229,7 @@ export default function PIBFormPage() {
       if (suppliersRes.data) setSuppliers(suppliersRes.data);
       if (ppjkRes.data) setPpjkList(ppjkRes.data);
       if (portsRes.data) setPorts(portsRes.data);
+      if (transportModesRes.data) setTransportModes(transportModesRes.data);
       if (incotermsRes.data) setIncoterms(incotermsRes.data);
       if (currenciesRes.data) setCurrencies(currenciesRes.data);
     } catch (error) {
@@ -366,10 +385,54 @@ export default function PIBFormPage() {
       if (!formData.currency_id) errors.push('Currency is required');
       if (!formData.transport_mode) errors.push('Transport mode is required');
       if (!formData.bl_awb_number) errors.push('B/L or AWB number is required');
+      
+      // CRITICAL: Validate incoterm-transport mode combination (CEISA/DJBC compliance)
+      const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+      if (selectedIncoterm && formData.transport_mode) {
+        if (!isValidIncotermForTransport(formData.transport_mode, selectedIncoterm.code)) {
+          const errorMsg = getIncotermTransportError(formData.transport_mode, selectedIncoterm.code);
+          errors.push(errorMsg || `Incoterm ${selectedIncoterm.code} tidak valid untuk transport mode ${formData.transport_mode}`);
+          // Log invalid attempt for audit
+          console.warn('[AUDIT] Invalid incoterm-transport combination attempted:', {
+            transport_mode: formData.transport_mode,
+            incoterm: selectedIncoterm.code,
+          });
+        }
+      }
     }
 
     if (currentStep === 3) {
       if (items.length === 0) errors.push('At least one item is required');
+    }
+
+    if (currentStep === 4) {
+      // Validate required documents based on transport mode
+      const uploadedTypes = new Set([
+        ...attachments.map(att => att.document_type),
+      ]);
+
+      // Always required
+      if (!uploadedTypes.has('INVOICE')) {
+        errors.push('Commercial Invoice is required');
+      }
+      if (!uploadedTypes.has('PACKING_LIST')) {
+        errors.push('Packing List is required');
+      }
+
+      // Transport-specific required documents
+      if (formData.transport_mode === 'AIR') {
+        if (!uploadedTypes.has('AWB')) {
+          errors.push('Air Waybill is required for AIR transport');
+        }
+      } else if (formData.transport_mode === 'SEA') {
+        if (!uploadedTypes.has('BL')) {
+          errors.push('Bill of Lading is required for SEA transport');
+        }
+      }
+
+      if (errors.length > 0) {
+        toast.error('Required supporting documents are incomplete');
+      }
     }
 
     if (errors.length > 0) {
@@ -389,6 +452,51 @@ export default function PIBFormPage() {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
+  // Check if Submit button should be enabled (comprehensive validation)
+  const canSubmit = (): boolean => {
+    // Importer required
+    if (!formData.importer_id) return false;
+    
+    // Supplier required
+    if (!formData.supplier_id && !formData.supplier_name) return false;
+    
+    // Transport vs Incoterm validation
+    if (formData.transport_mode && formData.incoterm_code) {
+      if (formData.transport_mode === 'AIR' && ['FOB', 'CFR', 'CIF', 'FAS'].includes(formData.incoterm_code)) {
+        return false;
+      }
+      if (!isValidIncotermForTransport(formData.transport_mode, formData.incoterm_code)) {
+        return false;
+      }
+    }
+    
+    // Goods required
+    if (items.length === 0) return false;
+    
+    // Validate goods items
+    const hasInvalidItems = items.some(item => {
+      if (!item.hs_code) return true;
+      if (!item.net_weight || item.net_weight <= 0) return true;
+      if (item.gross_weight !== undefined && item.net_weight !== undefined && item.gross_weight < item.net_weight) return true;
+      if (!item.quantity_unit) return true;
+      return false;
+    });
+    if (hasInvalidItems) return false;
+    
+    // Documents validation
+    const uploadedDocTypes = attachments.map(att => att.document_type);
+    if (!uploadedDocTypes.includes('INVOICE')) return false;
+    if (!uploadedDocTypes.includes('PACKING_LIST')) return false;
+    
+    if (formData.transport_mode === 'AIR' && !uploadedDocTypes.includes('AWB')) return false;
+    if (formData.transport_mode === 'SEA' && !uploadedDocTypes.includes('BL')) return false;
+    
+    // No validation errors
+    if (validationErrors.length > 0) return false;
+    
+    return true;
+  };
+
   const handleSaveDraft = async () => {
     setIsSaving(true);
     try {
@@ -402,6 +510,79 @@ export default function PIBFormPage() {
   };
 
   const handleSubmit = async () => {
+    // === VALIDATION ENGINE: validateBeforeSubmit ===
+    
+    const clientErrors: string[] = [];
+    
+    // === DOCUMENT INFO VALIDATION ===
+    if (!formData.importer_id) {
+      clientErrors.push('Importer NPWP wajib diisi');
+    }
+    if (!formData.supplier_id && !formData.supplier_name) {
+      clientErrors.push('Supplier wajib diisi');
+    }
+
+    // === TRANSPORT vs INCOTERM VALIDATION ===
+    if (formData.transport_mode && formData.incoterm_code) {
+      if (formData.transport_mode === 'AIR' && ['FOB', 'CFR', 'CIF', 'FAS'].includes(formData.incoterm_code)) {
+        clientErrors.push(`Incoterm ${formData.incoterm_code} tidak valid untuk transport AIR`);
+      }
+      if (!isValidIncotermForTransport(formData.transport_mode, formData.incoterm_code)) {
+        const errorMsg = getIncotermTransportError(formData.transport_mode, formData.incoterm_code);
+        if (errorMsg) clientErrors.push(errorMsg);
+      }
+    }
+
+    // === GOODS VALIDATION ===
+    if (items.length === 0) {
+      clientErrors.push('Minimal satu item barang wajib diisi');
+    }
+
+    // Validate each goods item
+    items.forEach((item, index) => {
+      const itemNum = index + 1;
+      
+      if (!item.hs_code) {
+        clientErrors.push(`Item ${itemNum}: HS Code wajib diisi`);
+      }
+      if (!item.net_weight || item.net_weight <= 0) {
+        clientErrors.push(`Item ${itemNum}: Net weight harus lebih dari 0`);
+      }
+      if (item.gross_weight !== undefined && item.net_weight !== undefined && item.gross_weight < item.net_weight) {
+        clientErrors.push(`Item ${itemNum}: Gross weight tidak boleh kurang dari Net weight`);
+      }
+      if (!item.quantity_unit) {
+        clientErrors.push(`Item ${itemNum}: Unit wajib diisi (dari HS Code)`);
+      }
+    });
+
+    // === SUPPORTING DOCUMENTS VALIDATION ===
+    const uploadedDocTypes = attachments.map(att => att.document_type);
+    
+    if (!uploadedDocTypes.includes('INVOICE')) {
+      clientErrors.push('Dokumen wajib belum lengkap: Commercial Invoice');
+    }
+    if (!uploadedDocTypes.includes('PACKING_LIST')) {
+      clientErrors.push('Dokumen wajib belum lengkap: Packing List');
+    }
+    
+    if (formData.transport_mode === 'AIR') {
+      if (!uploadedDocTypes.includes('AWB')) {
+        clientErrors.push('Air Waybill wajib untuk transport AIR');
+      }
+    } else if (formData.transport_mode === 'SEA') {
+      if (!uploadedDocTypes.includes('BL')) {
+        clientErrors.push('Bill of Lading wajib untuk transport SEA');
+      }
+    }
+
+    // === CHECK VALIDATION RESULT ===
+    if (clientErrors.length > 0) {
+      setValidationErrors(clientErrors);
+      clientErrors.forEach(err => toast.error(err));
+      return;
+    }
+    
     const doc: PIBDocument = {
       id: '',
       document_number: null,
@@ -671,22 +852,33 @@ export default function PIBFormPage() {
                     <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs">Transport Mode <span className="text-red-500">*</span></Label>
-                        <Select value={formData.transport_mode} onValueChange={(v) => handleChange('transport_mode', v)}>
+                        <Select value={formData.transport_mode} onValueChange={(v) => {
+                          handleChange('transport_mode', v);
+                          // Validate existing incoterm against new transport mode
+                          const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+                          if (selectedIncoterm && !isValidIncotermForTransport(v, selectedIncoterm.code)) {
+                            handleChange('incoterm_id', '');
+                            handleChange('incoterm_code', '');
+                            const mode = transportModes.find(m => m.code === v);
+                            toast.warning(`Incoterm ${selectedIncoterm.code} tidak valid untuk ${mode?.name || v}. Silakan pilih incoterm lain.`);
+                          }
+                        }}>
                           <SelectTrigger className="h-8 text-sm">
-                            <SelectValue />
+                            <SelectValue placeholder="Select transport mode" />
                           </SelectTrigger>
                           <SelectContent>
-                            {TRANSPORT_MODES.map((m) => (
-                              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                            {transportModes.map((m) => (
+                              <SelectItem key={m.id} value={m.code}>{m.name}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Vessel Name</Label>
+                        <Label className="text-xs">Vessel Name {(formData.transport_mode === 'SEA' || formData.transport_mode === 'MULTI') && <span className="text-red-500">*</span>}</Label>
                         <Input
                           value={formData.vessel_name}
                           onChange={(e) => handleChange('vessel_name', e.target.value)}
+                          disabled={formData.transport_mode !== 'SEA' && formData.transport_mode !== 'MULTI'}
                           className="h-8 text-sm"
                           placeholder="e.g. MV Pacific Star"
                         />
@@ -724,20 +916,78 @@ export default function PIBFormPage() {
                     </div>
 
                     <h2 className="text-sm font-semibold border-b pb-2 pt-4">Trade Terms</h2>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Incoterm <span className="text-red-500">*</span></Label>
-                        <Select value={formData.incoterm_id} onValueChange={(v) => handleChange('incoterm_id', v)}>
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select incoterm" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {incoterms.map((i) => (
-                              <SelectItem key={i.id} value={i.id}>{i.code} - {i.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    {(() => {
+                      const selectedIncoterm = incoterms.find(i => i.id === formData.incoterm_id);
+                      const allowedIncotermCodes = getAllowedIncoterms(formData.transport_mode || '');
+                      const incotermError = selectedIncoterm && formData.transport_mode 
+                        ? getIncotermTransportError(formData.transport_mode, selectedIncoterm.code) 
+                        : null;
+                      
+                      return (
+                        <>
+                          {/* Incoterm-Transport validation error */}
+                          {incotermError && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex items-start gap-2">
+                              <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                              <div className="text-xs text-red-700">
+                                <p className="font-medium">Kombinasi Tidak Valid</p>
+                                <p>{incotermError}</p>
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Incoterm <span className="text-red-500">*</span></Label>
+                              <Select 
+                                value={formData.incoterm_id} 
+                                onValueChange={(v) => {
+                                  const incoterm = incoterms.find(i => i.id === v);
+                                  if (incoterm && formData.transport_mode) {
+                                    if (!isValidIncotermForTransport(formData.transport_mode, incoterm.code)) {
+                                      toast.error(getIncotermTransportError(formData.transport_mode, incoterm.code));
+                                      return;
+                                    }
+                                  }
+                                  handleChange('incoterm_id', v);
+                                  if (incoterm) {
+                                    handleChange('incoterm_code', incoterm.code);
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className={`h-8 text-sm ${incotermError ? 'border-red-500' : ''}`}>
+                                  <SelectValue placeholder="Select incoterm" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {incoterms.map((i) => {
+                                    const isAllowed = !formData.transport_mode || allowedIncotermCodes.includes(i.code);
+                                    const isSeaOnly = isSeaOnlyIncoterm(i.code);
+                                    return (
+                                      <SelectItem 
+                                        key={i.id} 
+                                        value={i.id}
+                                        disabled={!isAllowed}
+                                        className={!isAllowed ? 'opacity-50' : ''}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span>{i.code} - {i.name}</span>
+                                          {isSeaOnly && (
+                                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded">SEA ONLY</span>
+                                          )}
+                                          {!isAllowed && (
+                                            <span className="text-[10px] text-red-500">(tidak valid)</span>
+                                          )}
+                                        </div>
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                              {formData.transport_mode && formData.transport_mode !== 'SEA' && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  FOB, CFR, CIF, FAS hanya untuk transport laut (SEA)
+                                </p>
+                              )}
+                            </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">Currency <span className="text-red-500">*</span></Label>
                         <Select value={formData.currency_id} onValueChange={(v) => handleChange('currency_id', v)}>
@@ -761,6 +1011,9 @@ export default function PIBFormPage() {
                         />
                       </div>
                     </div>
+                        </>
+                      );
+                    })()}
 
                     <h2 className="text-sm font-semibold border-b pb-2 pt-4">Freight & Insurance</h2>
                     <div className="grid grid-cols-2 gap-4">
@@ -805,6 +1058,7 @@ export default function PIBFormPage() {
                   <PIBAttachments
                     attachments={attachments}
                     onAttachmentsChange={setAttachments}
+                    transportMode={formData.transport_mode}
                   />
                 )}
 
@@ -857,7 +1111,7 @@ export default function PIBFormPage() {
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={isSaving || validationErrors.length > 0}
+                disabled={isSaving || !canSubmit()}
                 className="gap-1.5"
               >
                 <Send size={14} />

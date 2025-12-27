@@ -16,9 +16,14 @@ export type AuditAction =
   | 'EXPORT'
   | 'PRINT'
   | 'LOGIN'
-  | 'LOGOUT';
+  | 'LOGOUT'
+  | 'INVALID_INCOTERM_TRANSPORT'
+  | 'GENERATE_XML'
+  | 'SUBMIT_PEB'
+  | 'SUBMIT_PIB'
+  | 'LOCK_TRANSACTION';
 
-export type AuditEntityType = 'PEB' | 'PIB' | 'USER' | 'COMPANY' | 'SYSTEM' | 'SETTINGS';
+export type AuditEntityType = 'PEB' | 'PIB' | 'USER' | 'COMPANY' | 'SYSTEM' | 'SETTINGS' | 'peb_documents' | 'pib_documents';
 
 export interface AuditLog {
   id: string;
