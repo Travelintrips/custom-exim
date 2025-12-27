@@ -84,6 +84,13 @@ export default function LoginForm() {
             <Button type="submit" className="w-full" size="lg">
               Sign in
             </Button>
+
+            <div className="text-center text-sm text-muted-foreground">
+              Don't have an account?{" "}
+              <Link to="/register" className="text-primary hover:underline">
+                Create account
+              </Link>
+            </div>
           </form>
 
           <div className="mt-6 pt-6 border-t border-border text-center text-xs text-muted-foreground">

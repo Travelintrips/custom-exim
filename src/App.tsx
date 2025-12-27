@@ -2,6 +2,9 @@ import { Suspense } from "react";
 import { Navigate, Route, Routes, useRoutes, useLocation } from "react-router-dom";
 import routes from "tempo-routes";
 import LoginForm from "./components/auth/LoginForm";
+import RegisterForm from "./components/auth/RegisterForm";
+import ForgotPasswordForm from "./components/auth/ForgotPasswordForm";
+import ResetPasswordForm from "./components/auth/ResetPasswordForm";
 import Dashboard from "./components/pages/dashboard";
 import PEBList from "./components/pages/PEBList";
 import PEBFormPage from "./components/pages/PEBFormPage";
@@ -110,6 +113,30 @@ function AppRoutes() {
         element={
           <PublicRoute>
             <LoginForm />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/register"
+        element={
+          <PublicRoute>
+            <RegisterForm />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <ForgotPasswordForm />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          <PublicRoute>
+            <ResetPasswordForm />
           </PublicRoute>
         }
       />
