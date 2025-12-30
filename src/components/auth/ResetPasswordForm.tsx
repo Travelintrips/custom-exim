@@ -3,9 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNavigate, Link } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useEffect } from "react";
 
 export default function ResetPasswordForm() {
   const [password, setPassword] = useState("");
@@ -15,6 +22,14 @@ export default function ResetPasswordForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        setError("Invalid or expired recovery link.");
+      }
+    });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,12 +49,13 @@ export default function ResetPasswordForm() {
 
     try {
       const { error } = await supabase.auth.updateUser({
-        password: password,
+        password,
       });
 
       if (error) throw error;
 
-      alert("Password updated successfully!");
+      alert("Password updated successfully! Please login again.");
+      await supabase.auth.signOut(); // ← penting
       navigate("/");
     } catch (error: any) {
       setError(error.message || "Failed to reset password");
@@ -55,9 +71,7 @@ export default function ResetPasswordForm() {
           <CardTitle className="text-2xl font-semibold">
             Reset Password
           </CardTitle>
-          <CardDescription>
-            Enter your new password
-          </CardDescription>
+          <CardDescription>Enter your new password</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -100,7 +114,11 @@ export default function ResetPasswordForm() {
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  {showConfirmPassword ? (
+                    <EyeOff size={18} />
+                  ) : (
+                    <Eye size={18} />
+                  )}
                 </button>
               </div>
             </div>
@@ -111,15 +129,17 @@ export default function ResetPasswordForm() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              size="lg"
+              disabled={loading}
+            >
               {loading ? "Updating..." : "Reset Password"}
             </Button>
 
             <div className="text-center">
-              <Link
-                to="/"
-                className="text-sm text-primary hover:underline"
-              >
+              <Link to="/" className="text-sm text-primary hover:underline">
                 Back to Sign in
               </Link>
             </div>
