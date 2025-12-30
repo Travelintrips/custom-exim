@@ -17,16 +17,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active sessions and sets the user
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      // ⛔ Jangan set user di halaman reset-password
+      if (window.location.pathname === "/reset-password") {
+        setUser(null);
+      } else {
+        setUser(session?.user ?? null);
+      }
       setLoading(false);
     });
 
-    // Listen for changes on auth state (signed in, signed out, etc.)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // ⛔ Abaikan auth event saat reset password
+      if (window.location.pathname === "/reset-password") {
+        setUser(null);
+        return;
+      }
+
       setUser(session?.user ?? null);
       setLoading(false);
     });

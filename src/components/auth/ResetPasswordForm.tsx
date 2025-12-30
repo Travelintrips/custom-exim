@@ -56,6 +56,7 @@ export default function ResetPasswordForm() {
 
       alert("Password updated successfully! Please login again.");
       await supabase.auth.signOut(); // ← penting
+      window.history.replaceState({}, document.title, window.location.pathname);
       navigate("/");
     } catch (error: any) {
       setError(error.message || "Failed to reset password");
