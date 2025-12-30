@@ -3,8 +3,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useNavigate, Link } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -24,36 +36,37 @@ export default function RegisterForm() {
     setLoading(true);
 
     try {
-      // Sign up user
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
+      // 1️⃣ Sign up user (trigger akan buat row di public.users)
+      const { data: authData, error: signUpError } = await supabase.auth.signUp(
+        {
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+            },
           },
         },
-      });
+      );
 
       if (signUpError) throw signUpError;
 
       if (authData.user) {
-        // Insert user profile with role
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert([
-            {
-              id: authData.user.id,
-              email: authData.user.email,
-              full_name: fullName,
-              role: role,
-            },
-          ]);
+        // 2️⃣ OPTIONAL: update profile / role (JANGAN INSERT)
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({
+            full_name: fullName,
+            name: fullName,
+            role: role,
+          })
+          .eq("id", authData.user.id);
 
-        if (profileError) throw profileError;
+        if (updateError) throw updateError;
 
-        // Show success message and redirect
-        alert("Registration successful! Please check your email for verification.");
+        alert(
+          "Registration successful! Please check your email for verification.",
+        );
         navigate("/");
       }
     } catch (error: any) {
@@ -87,7 +100,7 @@ export default function RegisterForm() {
                 required
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -143,7 +156,12 @@ export default function RegisterForm() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full"
+              size="lg"
+              disabled={loading}
+            >
               {loading ? "Creating Account..." : "Sign up"}
             </Button>
 
