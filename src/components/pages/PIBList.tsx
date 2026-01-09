@@ -1,32 +1,53 @@
-import { AppLayout } from '../layout/AppLayout';
-import { Button } from '@/components/ui/button';
-import { Plus, FileDown, Send, Eye, Pencil, Trash2, History, User, Clock, RefreshCw, AlertCircle, Download } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { DataTable, Column } from '@/components/ui/data-table';
-import { StatusBadge, DocumentStatus, isLockedStatus } from '@/components/ui/status-badge';
-import { useRole } from '@/hooks/useRole';
-import { AuditTimeline, DocumentMeta, AuditEntry } from '@/components/ui/audit-timeline';
-import { supabase } from '@/lib/supabase';
-import { Skeleton } from '@/components/ui/skeleton';
+import { AppLayout } from "../layout/AppLayout";
+import { Button } from "@/components/ui/button";
+import {
+  Plus,
+  FileDown,
+  Send,
+  Eye,
+  Pencil,
+  Trash2,
+  History,
+  User,
+  Clock,
+  RefreshCw,
+  AlertCircle,
+  Download,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { DataTable, Column } from "@/components/ui/data-table";
+import {
+  StatusBadge,
+  DocumentStatus,
+  isLockedStatus,
+} from "@/components/ui/status-badge";
+import { useRole } from "@/hooks/useRole";
+import {
+  AuditTimeline,
+  DocumentMeta,
+  AuditEntry,
+} from "@/components/ui/audit-timeline";
+import { supabase } from "@/lib/supabase";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { fetchPIBFromCEISASmart, PIBFetchParams } from '@/lib/edi/pib-fetch';
-import { toast } from 'sonner';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+} from "@/components/ui/tooltip";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { fetchPIBFromCEISASmart, PIBFetchParams } from "@/lib/edi/pib-fetch";
+import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface PIBDocument {
   id: string;
@@ -44,55 +65,58 @@ interface PIBDocument {
 
 // Map database status to UI status
 function mapPIBStatus(dbStatus: string | null): DocumentStatus {
-  if (!dbStatus) return 'draft';
+  if (!dbStatus) return "draft";
   const statusMap: Record<string, DocumentStatus> = {
-    'DRAFT': 'draft',
-    'SUBMITTED': 'submitted',
-    'APPROVED': 'approved',
-    'REJECTED': 'rejected',
-    'UNDER_REVIEW': 'review',
-    'REVIEW': 'review',
-    'LOCKED': 'approved',
-    'SENT_TO_CEISA': 'submitted',
-    'CEISA_ACCEPTED': 'approved',
-    'CEISA_REJECTED': 'rejected',
+    DRAFT: "draft",
+    SUBMITTED: "submitted",
+    APPROVED: "approved",
+    REJECTED: "rejected",
+    UNDER_REVIEW: "review",
+    REVIEW: "review",
+    LOCKED: "approved",
+    SYNCED: "synced",
+    SENT_TO_CEISA: "submitted",
+    CEISA_ACCEPTED: "approved",
+    CEISA_REJECTED: "rejected",
   };
-  return statusMap[dbStatus.toUpperCase()] || 'draft';
+  return statusMap[dbStatus.toUpperCase()] || "draft";
 }
 
 // Format date for display
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '-';
+  if (!dateStr) return "-";
   try {
-    return new Date(dateStr).toLocaleDateString('en-CA'); // YYYY-MM-DD format
+    return new Date(dateStr).toLocaleDateString("en-CA"); // YYYY-MM-DD format
   } catch {
-    return '-';
+    return "-";
   }
 }
 
 // Format datetime for display
 function formatDateTime(dateStr: string | null): string {
-  if (!dateStr) return '-';
+  if (!dateStr) return "-";
   try {
     const date = new Date(dateStr);
-    return date.toLocaleString('en-CA', { 
-      year: 'numeric',
-      month: '2-digit', 
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).replace(',', '');
+    return date
+      .toLocaleString("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      .replace(",", "");
   } catch {
-    return '-';
+    return "-";
   }
 }
 
 const statusFilterOptions = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
-  { value: 'review', label: 'Under Review' },
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+  { value: "review", label: "Under Review" },
 ];
 
 export default function PIBList() {
@@ -102,20 +126,22 @@ export default function PIBList() {
   const [pibDocuments, setPibDocuments] = useState<PIBDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [auditHistory, setAuditHistory] = useState<Record<string, AuditEntry[]>>({});
+  const [auditHistory, setAuditHistory] = useState<
+    Record<string, AuditEntry[]>
+  >({});
   const [syncing, setSyncing] = useState(false);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncParams, setSyncParams] = useState({
-    nomorAju: '',
-    npwpImportir: '',
-    kodeKantor: '',
+    nomorAju: "",
+    npwpImportir: "",
+    kodeKantor: "",
   });
   const { permissions } = useRole();
 
   // Quick Sync from CEISA
   const handleQuickSync = async () => {
     if (!permissions.canSyncCEISA) {
-      toast.error('You do not have permission to sync with CEISA');
+      toast.error("You do not have permission to sync with CEISA");
       return;
     }
 
@@ -127,47 +153,56 @@ export default function PIBList() {
         nomorAju: syncParams.nomorAju,
         npwpImportir: syncParams.npwpImportir,
         kodeKantor: syncParams.kodeKantor,
-        jenisDokumen: 'BC20',
+        jenisDokumen: "BC20",
       };
 
-      toast.info('Syncing PIB data from CEISA...');
+      toast.info("Syncing PIB data from CEISA...");
 
       const result = await fetchPIBFromCEISASmart(params);
 
       if (result.success && result.data) {
         // Insert fetched data into Supabase
         const documents = result.data.map((item: any) => ({
-          nomor_aju: item.nomorAju || item.documentNumber,
-          tanggal_aju: item.tanggalAju || item.date,
-          nama_importir: item.namaImportir || item.importerName,
-          nilai_cif: item.nilaiCIF || item.totalValue || 0,
-          status: 'SUBMITTED',
-          xml_content: item.xmlContent || null,
-          xml_hash: null,
-          metadata: item,
+          nomor_aju: item.nomorAju,
+          tanggal_aju: item.tanggalAju,
+          nama_importir: item.importir?.nama,
+          importir_npwp: item.importir?.npwp,
+          importir_alamat: item.importir?.alamat,
+          customs_office_code: item.kantorPabean?.kode,
+          customs_office_name: item.kantorPabean?.nama,
+          total_cif_value: item.nilai?.cif || 0,
+          total_bea_masuk: item.pungutan?.bm || 0,
+          total_ppn: item.pungutan?.ppn || 0,
+          total_pph: item.pungutan?.pph || 0,
+          status: "SYNCED",
+          source: "CEISA",
+          ceisa_response: JSON.stringify(item),
+          synced_at: new Date().toISOString(),
         }));
 
         const { data: insertData, error: insertError } = await supabase
-          .from('pib_documents')
-          .upsert(documents, { onConflict: 'nomor_aju' })
+          .from("pib_documents")
+          .upsert(documents, { onConflict: "nomor_aju" })
           .select();
 
         if (insertError) throw insertError;
 
-        toast.success(`Synced ${insertData?.length || 0} PIB documents from CEISA`);
-        
+        toast.success(
+          `Synced ${insertData?.length || 0} PIB documents from CEISA`,
+        );
+
         // Refresh list
         await fetchPIBDocuments();
-        
+
         // Close dialog and reset form
         setShowSyncDialog(false);
-        setSyncParams({ nomorAju: '', npwpImportir: '', kodeKantor: '' });
+        setSyncParams({ nomorAju: "", npwpImportir: "", kodeKantor: "" });
       } else {
-        toast.warning(result.error || 'No PIB documents found in CEISA');
+        toast.warning(result.error || "No PIB documents found in CEISA");
       }
     } catch (err: any) {
-      console.error('Quick Sync Error:', err);
-      const errorMsg = err.message || 'Failed to sync with CEISA';
+      console.error("Quick Sync Error:", err);
+      const errorMsg = err.message || "Failed to sync with CEISA";
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {
@@ -179,15 +214,15 @@ export default function PIBList() {
   const fetchPIBDocuments = useCallback(async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const { data, error: fetchError } = await supabase
-        .from('pib_documents')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .from("pib_documents")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (fetchError) {
-        console.error('Error fetching PIB documents:', fetchError);
+        console.error("Error fetching PIB documents:", fetchError);
         setError(`Failed to load PIB documents: ${fetchError.message}`);
         setPibDocuments([]);
         return;
@@ -196,42 +231,26 @@ export default function PIBList() {
       // Map CEISA columns to UI format
       const transformedData: PIBDocument[] = (data || []).map((doc) => {
         const status = mapPIBStatus(doc.status);
-        let lastAction = 'Created';
-        let lastActionBy = doc.created_by || 'system';
-        let lastActionAt = doc.created_at || '';
-
-        // Determine last action based on status
-        if (doc.submitted_at) {
-          lastAction = status === 'approved' ? 'Approved' : 
-                       status === 'rejected' ? 'Rejected' : 
-                       status === 'review' ? 'Under Review' : 'Submitted';
-          lastActionBy = doc.submitted_by || doc.updated_by || lastActionBy;
-          lastActionAt = doc.updated_at || doc.submitted_at || lastActionAt;
-        } else if (doc.updated_at && doc.updated_at !== doc.created_at) {
-          lastAction = 'Edited';
-          lastActionBy = doc.updated_by || lastActionBy;
-          lastActionAt = doc.updated_at;
-        }
 
         return {
           id: doc.id,
-          documentNumber: doc.nomor_aju || doc.document_number || `PIB-${doc.id.slice(0, 8).toUpperCase()}`,
-          date: formatDate(doc.tanggal_aju || doc.registration_date || doc.created_at),
-          importerName: doc.nama_importir || doc.importer_name || doc.npwp || 'Unknown Importer',
-          totalValue: doc.nilai_cif || doc.total_cif_value || 0,
+          documentNumber: doc.nomor_aju, // NO fallback
+          date: formatDate(doc.tanggal_aju),
+          importerName: doc.nama_importir,
+          totalValue: doc.nilai_cif,
           status,
-          createdBy: doc.created_by || 'system',
+          createdBy: doc.created_by || "system",
           createdAt: formatDateTime(doc.created_at),
-          lastAction,
-          lastActionBy,
-          lastActionAt: formatDateTime(lastActionAt),
+          lastAction: status === "draft" ? "Created" : "Synced from CEISA",
+          lastActionBy: doc.updated_by || "system",
+          lastActionAt: formatDateTime(doc.updated_at || doc.created_at),
         };
       });
 
       setPibDocuments(transformedData);
     } catch (err) {
-      console.error('Error fetching PIB documents:', err);
-      setError('An unexpected error occurred while loading PIB documents');
+      console.error("Error fetching PIB documents:", err);
+      setError("An unexpected error occurred while loading PIB documents");
       setPibDocuments([]);
     } finally {
       setLoading(false);
@@ -242,21 +261,21 @@ export default function PIBList() {
   const fetchAuditHistory = useCallback(async (docId: string) => {
     try {
       const { data, error: fetchError } = await supabase
-        .from('audit_logs')
-        .select('id, action, user_id, created_at, notes, metadata')
-        .eq('ref_id', docId)
-        .eq('ref_type', 'PIB')
-        .order('created_at', { ascending: false });
+        .from("audit_logs")
+        .select("id, action, user_id, created_at, notes, metadata")
+        .eq("ref_id", docId)
+        .eq("ref_type", "PIB")
+        .order("created_at", { ascending: false });
 
       if (fetchError) {
-        console.error('Error fetching audit history:', fetchError);
+        console.error("Error fetching audit history:", fetchError);
         return;
       }
 
       const entries: AuditEntry[] = (data || []).map((log) => ({
         id: log.id,
-        action: log.action || 'Action',
-        user: log.user_id || 'system',
+        action: log.action || "Action",
+        user: log.user_id || "system",
         timestamp: formatDateTime(log.created_at),
         status: mapPIBStatus(log.metadata?.status || null),
         description: log.notes || undefined,
@@ -264,7 +283,7 @@ export default function PIBList() {
 
       setAuditHistory((prev) => ({ ...prev, [docId]: entries }));
     } catch (err) {
-      console.error('Error fetching audit history:', err);
+      console.error("Error fetching audit history:", err);
     }
   }, []);
 
@@ -282,30 +301,34 @@ export default function PIBList() {
 
   const columns: Column<PIBDocument>[] = [
     {
-      id: 'documentNumber',
-      header: 'Document Number',
-      accessor: 'documentNumber',
-      className: 'font-mono text-xs',
+      id: "documentNumber",
+      header: "Document Number",
+      accessor: "documentNumber",
+      className: "font-mono text-xs",
     },
     {
-      id: 'date',
-      header: 'Date',
-      accessor: 'date',
+      id: "date",
+      header: "Date",
+      accessor: "date",
     },
     {
-      id: 'importerName',
-      header: 'Importer Name',
-      accessor: 'importerName',
+      id: "importerName",
+      header: "Importer Name",
+      accessor: "importerName",
     },
     {
-      id: 'totalValue',
-      header: 'Total Value (USD)',
-      accessor: (row) => row.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      className: 'text-right font-mono',
+      id: "totalValue",
+      header: "Total Value (USD)",
+      accessor: (row) =>
+        row.totalValue.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }),
+      className: "text-right font-mono",
     },
     {
-      id: 'createdBy',
-      header: 'Created By',
+      id: "createdBy",
+      header: "Created By",
       accessor: (row) => (
         <TooltipProvider>
           <Tooltip>
@@ -323,8 +346,8 @@ export default function PIBList() {
       ),
     },
     {
-      id: 'lastAction',
-      header: 'Last Action',
+      id: "lastAction",
+      header: "Last Action",
       accessor: (row) => (
         <div className="text-xs">
           <div className="font-medium">{row.lastAction}</div>
@@ -336,9 +359,14 @@ export default function PIBList() {
       ),
     },
     {
-      id: 'status',
-      header: 'Status',
-      accessor: (row) => <StatusBadge status={row.status} showIcon={isLockedStatus(row.status)} />,
+      id: "status",
+      header: "Status",
+      accessor: (row) => (
+        <StatusBadge
+          status={row.status}
+          showIcon={isLockedStatus(row.status)}
+        />
+      ),
       filterable: true,
       filterOptions: statusFilterOptions,
     },
@@ -348,19 +376,40 @@ export default function PIBList() {
     const locked = isLockedStatus(row.status) || permissions.isReadOnly;
     return (
       <>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/pib/${row.id}`)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => navigate(`/pib/${row.id}`)}
+        >
           <Eye size={14} />
         </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSelectedDoc(row)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setSelectedDoc(row)}
+        >
           <History size={14} />
         </Button>
         {permissions.canEditPIB && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" disabled={locked} onClick={() => navigate(`/pib/${row.id}/edit`)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            disabled={locked}
+            onClick={() => navigate(`/pib/${row.id}/edit`)}
+          >
             <Pencil size={14} />
           </Button>
         )}
         {permissions.canDeletePIB && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={locked}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-destructive hover:text-destructive"
+            disabled={locked}
+          >
             <Trash2 size={14} />
           </Button>
         )}
@@ -376,7 +425,9 @@ export default function PIBList() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-xl font-semibold">Import - PIB</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">Loading documents...</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Loading documents...
+              </p>
             </div>
           </div>
           <Card>
@@ -398,26 +449,37 @@ export default function PIBList() {
           <div>
             <h1 className="text-xl font-semibold">Import - PIB</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {permissions.isReadOnly ? 'View import declarations (Read-Only)' : 'Manage import declarations (Pemberitahuan Impor Barang)'}
+              {permissions.isReadOnly
+                ? "View import declarations (Read-Only)"
+                : "Manage import declarations (Pemberitahuan Impor Barang)"}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="gap-1.5" 
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
               onClick={() => setShowSyncDialog(true)}
               disabled={syncing || !permissions.canSyncCEISA}
             >
               <Download size={14} />
               Sync CEISA
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={fetchPIBDocuments}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={fetchPIBDocuments}
+            >
               <RefreshCw size={14} />
               Refresh
             </Button>
             {permissions.canCreatePIB && (
-              <Button size="sm" className="gap-1.5" onClick={() => navigate('/pib/new')}>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => navigate("/pib/new")}
+              >
                 <Plus size={16} />
                 New PIB
               </Button>
@@ -440,7 +502,11 @@ export default function PIBList() {
               Export Excel
             </Button>
             {permissions.canSyncCEISA && (
-              <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+              >
                 <Send size={14} />
                 Send to CEISA
               </Button>
@@ -482,9 +548,11 @@ export default function PIBList() {
                   lastActionAt={selectedDoc.lastActionAt}
                 />
                 <div className="border-t pt-4">
-                  <h4 className="text-xs font-semibold text-muted-foreground mb-3">Status Timeline</h4>
-                  <AuditTimeline 
-                    entries={auditHistory[selectedDoc.id] || []} 
+                  <h4 className="text-xs font-semibold text-muted-foreground mb-3">
+                    Status Timeline
+                  </h4>
+                  <AuditTimeline
+                    entries={auditHistory[selectedDoc.id] || []}
                     compact
                   />
                 </div>
@@ -506,29 +574,38 @@ export default function PIBList() {
                   id="nomorAju"
                   placeholder="e.g., 000000-00000000-00000000"
                   value={syncParams.nomorAju}
-                  onChange={(e) => setSyncParams({ ...syncParams, nomorAju: e.target.value })}
+                  onChange={(e) =>
+                    setSyncParams({ ...syncParams, nomorAju: e.target.value })
+                  }
                   disabled={syncing}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="npwpImportir">NPWP Importir *</Label>
                 <Input
                   id="npwpImportir"
                   placeholder="e.g., 00.000.000.0-000.000"
                   value={syncParams.npwpImportir}
-                  onChange={(e) => setSyncParams({ ...syncParams, npwpImportir: e.target.value })}
+                  onChange={(e) =>
+                    setSyncParams({
+                      ...syncParams,
+                      npwpImportir: e.target.value,
+                    })
+                  }
                   disabled={syncing}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="kodeKantor">Kode Kantor Bea Cukai *</Label>
                 <Input
                   id="kodeKantor"
                   placeholder="e.g., 040100"
                   value={syncParams.kodeKantor}
-                  onChange={(e) => setSyncParams({ ...syncParams, kodeKantor: e.target.value })}
+                  onChange={(e) =>
+                    setSyncParams({ ...syncParams, kodeKantor: e.target.value })
+                  }
                   disabled={syncing}
                 />
               </div>
@@ -543,7 +620,12 @@ export default function PIBList() {
                 </Button>
                 <Button
                   onClick={handleQuickSync}
-                  disabled={syncing || !syncParams.nomorAju || !syncParams.npwpImportir || !syncParams.kodeKantor}
+                  disabled={
+                    syncing ||
+                    !syncParams.nomorAju ||
+                    !syncParams.npwpImportir ||
+                    !syncParams.kodeKantor
+                  }
                 >
                   {syncing ? (
                     <>
