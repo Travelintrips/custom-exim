@@ -8,6 +8,7 @@
  */
 
 import { PIBDocument, PIBStatus, PIBLane } from "@/types/pib";
+import { supabase } from "@/lib/supabase";
 
 // =====================================================
 // TYPES & INTERFACES
@@ -146,6 +147,8 @@ export interface PIBFetchResult {
 export interface PIBFetchConfig {
   baseUrl?: string;
   timeout?: number;
+  /** If true, don't fall back to mock data on failure */
+  fallbackToMock?: boolean;
 }
 
 // =====================================================
@@ -153,7 +156,7 @@ export interface PIBFetchConfig {
 // =====================================================
 
 const DEFAULT_CONFIG: PIBFetchConfig = {
-  baseUrl: import.meta.env.CEISA_API_URL || "https://api-ceisa.beacukai.go.id",
+  baseUrl: import.meta.env.CEISA_API_URL || "https://apis-gw.beacukai.go.id",
   timeout: 30000, // 30 seconds for data fetch
 };
 
@@ -871,30 +874,149 @@ export async function fetchPIBFromCEISAMock(
 }
 
 // =====================================================
+// EDGE FUNCTION FETCH (REAL API VIA PROXY)
+// =====================================================
+
+/**
+ * Fetch PIB data from CEISA via Edge Function proxy
+ * This bypasses CORS restrictions by using Supabase Edge Function
+ */
+export async function fetchPIBFromCEISAViaProxy(
+  params: PIBFetchParams,
+): Promise<PIBFetchResult> {
+  const timestamp = new Date().toISOString();
+  const startTime = performance.now();
+
+  try {
+    // Build proxy params
+    const proxyParams: Record<string, string> = {
+      nomorAju: params.nomorAju,
+      npwpImportir: params.npwpImportir,
+      kodeKantor: params.kodeKantor,
+      jenisDokumen: params.jenisDokumen || "BC20",
+    };
+
+    if (params.dateFrom) proxyParams.dateFrom = params.dateFrom;
+    if (params.dateTo) proxyParams.dateTo = params.dateTo;
+    if (params.page) proxyParams.page = params.page.toString();
+    if (params.pageSize) proxyParams.pageSize = params.pageSize.toString();
+
+    // Call CEISA proxy edge function
+    const { data, error } = await supabase.functions.invoke(
+      "supabase-functions-ceisa-proxy",
+      {
+        body: {
+          action: "fetch",
+          endpoint: "/api/v1/pib",
+          params: proxyParams,
+        },
+      },
+    );
+
+    const responseTime = Math.round(performance.now() - startTime);
+
+    if (error) {
+      throw new Error(`Edge function error: ${error.message}`);
+    }
+
+    if (!data || data.success === false) {
+      throw new Error(data?.error || "CEISA API request failed");
+    }
+
+    // Map CEISA response to PIBDocument format
+    const ceisaData = data.data || [];
+    const mappedData = Array.isArray(ceisaData)
+      ? ceisaData.map((item: CEISAPIBData) => mapCEISAToPIBDocument(item))
+      : [];
+
+    // Log operation
+    logCEISAPIBOperation({
+      timestamp,
+      operation: "fetchPIBFromCEISAViaProxy",
+      params,
+      httpStatus: 200,
+      responseTime,
+      success: true,
+      rawResponse: data,
+    });
+
+    return {
+      success: true,
+      data: mappedData,
+      rawResponse: data,
+      total: data.meta?.total || mappedData.length,
+      page: data.meta?.page || params.page || 1,
+      pageSize: data.meta?.pageSize || params.pageSize || 10,
+      totalPages: data.meta?.totalPages || 1,
+      httpStatus: 200,
+      timestamp,
+      responseTime,
+    };
+  } catch (error: any) {
+    const responseTime = Math.round(performance.now() - startTime);
+    console.error("CEISA PIB API Error:", error);
+
+    // Log error
+    logCEISAPIBOperation({
+      timestamp,
+      operation: "fetchPIBFromCEISAViaProxy",
+      params,
+      httpStatus: null,
+      responseTime,
+      success: false,
+      error: error.message,
+    });
+
+    return {
+      success: false,
+      data: [],
+      rawResponse: null,
+      total: 0,
+      page: params.page || 1,
+      pageSize: params.pageSize || 10,
+      totalPages: 0,
+      error: error.message,
+      httpStatus: null,
+      timestamp,
+      responseTime,
+    };
+  }
+}
+
+// =====================================================
 // SMART FETCH (AUTO-SWITCH MOCK/REAL)
 // =====================================================
 
 /**
- * Smart PIB fetch that uses mock in development without API key
+ * Smart PIB fetch that uses Edge Function proxy for real CEISA data
+ * Falls back to mock only if explicitly requested or on error
  *
- * NOTE: Due to CORS restrictions, direct browser-to-CEISA API calls are blocked.
- * In production, this should go through a backend proxy (Edge Function).
+ * NOTE: Uses Supabase Edge Function to bypass CORS restrictions
  */
 export async function fetchPIBFromCEISASmart(
   params: PIBFetchParams,
   config?: PIBFetchConfig,
 ): Promise<PIBFetchResult> {
-  const isDev = import.meta.env.DEV;
-  const hasMockFlag = import.meta.env.VITE_CEISA_USE_MOCK === "true";
-  const hasApiKey = !!import.meta.env.CEISA_API_KEY;
+  const hasMockFlag = import.meta.env.CEISA_USE_MOCK === "true";
 
-  // Always use mock in browser due to CORS restrictions
-  const isBrowser = typeof window !== "undefined";
-
-  // Use mock if running in browser (CORS), dev without API key, or mock flag set
-  if (isBrowser || (isDev && !hasApiKey) || hasMockFlag) {
+  // Use mock only if explicitly requested via env flag
+  if (hasMockFlag) {
+    console.log("[PIB Fetch] Using mock data (CEISA_USE_MOCK=false)");
     return fetchPIBFromCEISAMock(params);
   }
 
-  return fetchPIBFromCEISA(params, config);
+  // Use Edge Function proxy to fetch real data from CEISA
+  console.log("[PIB Fetch] Fetching real data via Edge Function proxy");
+  const result = await fetchPIBFromCEISAViaProxy(params);
+
+  // If proxy fails, optionally fall back to mock (can be disabled)
+  if (!result.success && config?.fallbackToMock !== false) {
+    console.warn(
+      "[PIB Fetch] Proxy failed, falling back to mock data:",
+      result.error,
+    );
+    return fetchPIBFromCEISAMock(params);
+  }
+
+  return result;
 }

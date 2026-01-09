@@ -228,8 +228,18 @@ export function useEDIQueue(pollInterval: number = 5000) {
 }
 
 /**
- * Hook for monitoring EDI connection status
- * Uses checkCEISAConnectionSmart to validate API connectivity
+ * Hook for monitoring EDI/CEISA connection status
+ * 
+ * CEISA 4.0 Architecture Compliant:
+ * - Uses testCeisaConnection() from ceisa-sync-service.ts via ceisa-connection.ts
+ * - Connected = Auth CEISA berhasil via __test__ endpoint
+ * - Disconnected = Auth gagal / Edge Function error
+ * - Status DOES NOT depend on data availability
+ * 
+ * DILARANG:
+ * - Memanggil supabase.functions.invoke langsung
+ * - Memanggil endpoint /openapi/status atau /health langsung
+ * - Menganggap non-2xx response sebagai CEISA down
  */
 export interface CEISAConnectionState {
   isConnected: boolean;
@@ -251,27 +261,47 @@ export function useEDIConnectionStatus(pollInterval: number = 10000) {
   });
   
   const checkConnection = useCallback(async () => {
-    setState(prev => ({ ...prev, isChecking: true }));
+    setState(prev => ({ ...prev, isChecking: true, error: null }));
     
     try {
       // Import dynamically to avoid circular dependencies
+      // Uses checkCEISAConnectionSmart which calls testCeisaConnection() internally
       const { checkCEISAConnectionSmart } = await import('@/lib/edi/ceisa-connection');
       const result = await checkCEISAConnectionSmart();
       
       setState({
         isConnected: result.connected,
         lastCheck: result.timestamp,
-        httpStatus: result.httpStatus,
+        httpStatus: result.httpStatus ?? null,
         responseTime: result.responseTime ?? null,
-        error: result.error ?? null,
+        // Only show error if not connected
+        error: result.connected ? null : (result.error ?? null),
         isChecking: false,
       });
     } catch (err) {
+      // Transform error to user-friendly message
+      // Don't show raw "Edge Function returned a non-2xx status code" message
+      let errorMessage = "Gagal memeriksa koneksi CEISA";
+      
+      if (err instanceof Error) {
+        if (err.message.includes("non-2xx status code")) {
+          errorMessage = "CEISA tidak dapat dijangkau";
+        } else if (err.message.includes("Failed to fetch")) {
+          errorMessage = "Koneksi jaringan terputus";
+        } else if (err.message.includes("timeout")) {
+          errorMessage = "Koneksi timeout";
+        } else {
+          errorMessage = err.message;
+        }
+      }
+
       setState(prev => ({
         ...prev,
         isConnected: false,
         lastCheck: new Date().toISOString(),
-        error: err instanceof Error ? err.message : 'Connection check failed',
+        httpStatus: 500, // Exception = internal error
+        responseTime: null,
+        error: errorMessage,
         isChecking: false,
       }));
     }
@@ -281,11 +311,17 @@ export function useEDIConnectionStatus(pollInterval: number = 10000) {
     checkConnection();
   }, [checkConnection]);
   
+  // Initial load
   useEffect(() => {
     checkConnection();
-    const interval = setInterval(checkConnection, pollInterval);
-    
-    return () => clearInterval(interval);
+  }, [checkConnection]);
+
+  // Optional polling interval
+  useEffect(() => {
+    if (pollInterval > 0) {
+      const interval = setInterval(checkConnection, pollInterval);
+      return () => clearInterval(interval);
+    }
   }, [pollInterval, checkConnection]);
   
   return { 

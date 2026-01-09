@@ -1,266 +1,297 @@
 /**
- * CEISA Sync Service
- * Synchronizes data from CEISA API to Supabase tables
- * Uses Edge Function proxy to bypass CORS restrictions
+ * CEISA 4.0 Sync Service (Host-to-Host DJBC Architecture)
+ *
+ * IMPORTANT NOTES:
+ * - CEISA 4.0 is a document submission system, NOT a browse/pull API
+ * - There are NO /pib/browse, /peb/browse, /manifest/browse endpoints
+ * - All data originates from local payload, submitted TO CEISA, not FROM CEISA
+ * - Status polling is done via GET /openapi/status/:nomorAju
+ *
+ * Flow:
+ * 1. Save payload locally (draft)
+ * 2. POST /openapi/document?isFinal=true (submit to CEISA)
+ * 3. Get nomorAju from response
+ * 4. Poll GET /openapi/status/:nomorAju for status updates
+ * 5. Store status & response locally
  */
 
 import { supabase } from "@/lib/supabase";
-{
-  /*
-const CEISA_API_URL = import.meta.env.VITE_CEISA_API_URL;
-const CEISA_API_KEY = import.meta.env.VITE_CEISA_API_KEY;
-*/
+
+// ========== TYPES ==========
+
+export interface SubmitResult {
+  success: boolean;
+  nomorAju?: string;
+  message: string;
+  error?: string;
+  rawResponse?: any;
 }
-const USE_EDGE_PROXY = true; // Always use edge function for browser CORS
+
+export interface StatusResult {
+  success: boolean;
+  nomorAju: string;
+  status?: {
+    kodeStatus: string;
+    kodeRespon: string;
+    nomorDaftar?: string;
+    tanggalDaftar?: string;
+    waktuStatus?: string;
+    keterangan?: string;
+    pesan?: string[];
+  };
+  error?: string;
+  rawResponse?: any;
+}
+
+export interface SaveResult {
+  success: boolean;
+  id?: string;
+  nomorAju?: string;
+  error?: string;
+}
+
+export interface SyncStatusResult {
+  success: boolean;
+  nomorAju: string;
+  previousStatus?: string;
+  newStatus?: string;
+  affected: number;
+  error?: string;
+}
+
+interface CeisaApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  code?: string;
+  message?: string;
+}
+
+// ========== API HELPER ==========
+
+/**
+ * Call CEISA API via Edge Function proxy
+ * All CEISA communication MUST go through this function
+ *
+ * @param endpoint - CEISA API endpoint (e.g., /openapi/document, /openapi/status)
+ * @param method - HTTP method
+ * @param payload - Request body (for POST requests)
+ */
+async function callCeisaApi<T = any>(
+  endpoint: string,
+  method: "GET" | "POST" = "GET",
+  payload?: any,
+): Promise<CeisaApiResponse<T>> {
+  try {
+    const { data, error } = await supabase.functions.invoke(
+      "supabase-functions-ceisa-proxy",
+      {
+        body: {
+          endpoint,
+          method,
+          payload,
+        },
+      },
+    );
+
+    if (error) {
+      console.error(`CEISA Proxy Error (${endpoint}):`, error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data?.success) {
+      return {
+        success: false,
+        error: data?.error || data?.message || "CEISA API error",
+        code: data?.code,
+      };
+    }
+
+    return {
+      success: true,
+      data: data.data,
+      code: data.code,
+      message: data.message,
+    };
+  } catch (err: any) {
+    console.error(`CEISA API Error (${endpoint}):`, err);
+    return { success: false, error: err.message };
+  }
+}
 
 // ========== CONNECTION TEST ==========
-//kode awal
-{
-  /*
+
+/**
+ * Test connection to CEISA API
+ */
 export async function testCeisaConnection(): Promise<{
   success: boolean;
   message: string;
   details?: any;
 }> {
-  try {
-    // Try to call a lightweight endpoint
-    const result = await callCeisaApi<any>('/health');
-    
-    if (result.success) {
-      return {
-        success: true,
-        message: 'Koneksi ke API CEISA berhasil',
-        details: result.data,
-      };
-    } else {
-      return {
-        success: false,
-        message: result.error || 'Gagal terhubung ke API CEISA',
-      };
-    }
-  } catch (error: any) {
-    return {
-      success: false,
-      message: `Error: ${error.message}`,
-    };
-  }
-}
-*/
-}
+  const result = await callCeisaApi("__test__", "GET");
 
-// tes kode
-export async function testCeisaConnection() {
-  const { data, error } = await supabase.functions.invoke(
-    "supabase-functions-ceisa-proxy",
-    {
-      body: { endpoint: "/health" },
-    },
-  );
-
-  if (error || !data?.success) {
+  if (result.success) {
     return {
-      success: false,
-      message: "CEISA Terputus",
+      success: true,
+      message: "CEISA Connected",
+      details: result.data,
     };
   }
 
   return {
-    success: true,
-    message: "CEISA Connected",
+    success: false,
+    message: result.error || "CEISA Terputus",
   };
-}
-
-// ========== TYPES ==========
-
-export interface SyncResult {
-  success: boolean;
-  table: string;
-  inserted: number;
-  updated: number;
-  errors: string[];
-  synced_at: string;
-  source: "CEISA" | "MOCK";
-}
-
-export interface SyncAllResult {
-  success: boolean;
-  results: SyncResult[];
-  total_inserted: number;
-  total_updated: number;
-  duration_ms: number;
-}
-
-interface CeisaApiResponse<T> {
-  success: boolean;
-  data: T[];
-  error?: string;
-}
-
-// ========== API HELPERS ==========
-
-async function callCeisaApi<T>(
-  endpoint: string,
-  params?: Record<string, string>,
-): Promise<CeisaApiResponse<T>> {
-  // Use Edge Function proxy to bypass CORS
-  if (USE_EDGE_PROXY) {
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "supabase-functions-ceisa-proxy",
-        {
-          body: { endpoint, params },
-        },
-      );
-
-      if (error) {
-        console.error(`CEISA Proxy Error (${endpoint}):`, error);
-        return { success: false, data: [], error: error.message };
-      }
-
-      if (!data.success) {
-        return {
-          success: false,
-          data: [],
-          error: data.error || "Unknown error",
-        };
-      }
-
-      return { success: true, data: Array.isArray(data.data) ? data.data : [] };
-    } catch (error: any) {
-      console.error(`CEISA API Error (${endpoint}):`, error);
-      return { success: false, data: [], error: error.message };
-    }
-  }
-
-  // Direct API call (for non-browser environments)
-  if (!CEISA_API_URL || !CEISA_API_KEY) {
-    console.warn(`CEISA API not configured for endpoint: ${endpoint}`);
-    return { success: false, data: [], error: "API not configured" };
-  }
-
-  try {
-    const queryParams = new URLSearchParams(params);
-    const url = `${CEISA_API_URL}${endpoint}?${queryParams.toString()}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${CEISA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `CEISA API error: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const result = await response.json();
-    return { success: true, data: result.data || [] };
-  } catch (error: any) {
-    console.error(`CEISA API Error (${endpoint}):`, error);
-    return { success: false, data: [], error: error.message };
-  }
 }
 
 // ========== TRANSFORM FUNCTIONS ==========
 
-function transformPibDocument(raw: any): any {
+/**
+ * Transform internal PIB payload to database format
+ * Used when saving PIB from local form, NOT from CEISA response
+ */
+function transformPibFromPayload(payload: any): any {
   return {
-    nomor_aju: raw.nomorAju || raw.nomor_aju,
-    registration_number: raw.nomorPendaftaran || raw.nomor_pendaftaran || null,
-    registration_date:
-      raw.tanggalPendaftaran || raw.tanggal_pendaftaran || null,
-    importer_npwp: raw.importirNpwp || raw.npwp_importir || null,
-    importer_name: raw.importirNama || raw.nama_importir || null,
-    importer_address: raw.importirAlamat || raw.alamat_importir || null,
-    total_cif_value: parseFloat(
-      raw.totalNilaiPabean || raw.total_nilai_pabean || 0,
-    ),
-    total_bm: parseFloat(raw.totalBeaMasuk || raw.total_bea_masuk || 0),
-    total_ppn: parseFloat(raw.totalPpn || raw.total_ppn || 0),
-    total_pph: parseFloat(raw.totalPph || raw.total_pph || 0),
-    metadata: raw,
+    nomor_aju: payload.nomorAju,
+    kode_dokumen: payload.kodeDokumen || "20", // BC 2.0
+    tanggal_aju: payload.tanggalAju,
+
+    importer_npwp: payload.importir?.npwp ?? null,
+    importer_name: payload.importir?.nama ?? null,
+    importer_address: payload.importir?.alamat ?? null,
+
+    cif: Number(payload.cif ?? 0),
+    fob: Number(payload.fob ?? 0),
+    freight: Number(payload.freight ?? 0),
+    asuransi: Number(payload.asuransi ?? 0),
+
+    bruto: Number(payload.bruto ?? 0),
+    netto: Number(payload.netto ?? 0),
+
+    jumlah_barang: Array.isArray(payload.barang) ? payload.barang.length : 0,
+
+    metadata: payload,
+    source: "LOCAL",
     synced_at: new Date().toISOString(),
-    source: "CEISA",
   };
 }
 
-function transformPebDocument(raw: any): any {
+/**
+ * Transform internal PEB payload to database format
+ * Used when saving PEB from local form, NOT from CEISA response
+ */
+function transformPebFromPayload(payload: any): any {
   return {
-    nomor_aju: raw.nomorAju || raw.nomor_aju,
-    registration_number: raw.nomorPendaftaran || raw.nomor_pendaftaran || null,
-    registration_date:
-      raw.tanggalPendaftaran || raw.tanggal_pendaftaran || null,
-    exporter_npwp: raw.eksportirNpwp || raw.npwp_eksportir || null,
-    exporter_name: raw.eksportirNama || raw.nama_eksportir || null,
-    exporter_address: raw.eksportirAlamat || raw.alamat_eksportir || null,
-    total_fob_value: parseFloat(raw.totalNilaiFob || raw.total_nilai_fob || 0),
-    destination_country: raw.negaraTujuan || raw.negara_tujuan || null,
-    loading_port_name: raw.pelabuhanMuat || raw.pelabuhan_muat || null,
-    metadata: raw,
+    nomor_aju: payload.nomorAju,
+    kode_dokumen: payload.kodeDokumen || "30", // BC 3.0
+    tanggal_aju: payload.tanggalAju,
+
+    exporter_npwp: payload.eksportir?.npwp ?? null,
+    exporter_name: payload.eksportir?.nama ?? null,
+    exporter_address: payload.eksportir?.alamat ?? null,
+
+    fob: Number(payload.fob ?? 0),
+    freight: Number(payload.freight ?? 0),
+    asuransi: Number(payload.asuransi ?? 0),
+
+    bruto: Number(payload.bruto ?? 0),
+    netto: Number(payload.netto ?? 0),
+
+    negara_tujuan: payload.negaraTujuan ?? null,
+    pelabuhan_muat: payload.pelabuhanMuat ?? null,
+    pelabuhan_bongkar: payload.pelabuhanBongkar ?? null,
+
+    jumlah_barang: Array.isArray(payload.barang) ? payload.barang.length : 0,
+
+    metadata: payload,
+    source: "LOCAL",
     synced_at: new Date().toISOString(),
-    source: "CEISA",
   };
 }
 
-function transformManifest(raw: any): any {
+/**
+ * Transform CEISA status response to database format
+ * Used for results from GET /openapi/status or GET /openapi/status/:nomorAju
+ */
+function transformCeisaStatus(raw: any): any {
   return {
-    nomor_aju: raw.nomorAju || raw.nomor_aju,
-    nomor_manifest: raw.nomorManifest || raw.nomor_manifest,
-    tanggal_manifest: raw.tanggalManifest || raw.tanggal_manifest,
-    nama_kapal: raw.namaKapal || raw.nama_kapal,
-    bendera: raw.bendera,
-    voyage_number: raw.voyageNumber || raw.voyage_number,
-    pelabuhan_asal: raw.pelabuhanAsal || raw.pelabuhan_asal,
-    pelabuhan_tujuan: raw.pelabuhanTujuan || raw.pelabuhan_tujuan,
-    tanggal_tiba: raw.tanggalTiba || raw.tanggal_tiba,
-    jumlah_kontainer: raw.jumlahKontainer || raw.jumlah_kontainer || 0,
-    jumlah_kemasan: raw.jumlahKemasan || raw.jumlah_kemasan || 0,
-    berat_kotor: raw.beratKotor || raw.berat_kotor || 0,
-    berat_bersih: raw.beratBersih || raw.berat_bersih || 0,
-    satuan_berat: raw.satuanBerat || raw.satuan_berat || "KG",
-    jenis_kemasan: raw.jenisKemasan || raw.jenis_kemasan,
-    nama_pengirim: raw.namaPengirim || raw.nama_pengirim,
-    nama_penerima: raw.namaPenerima || raw.nama_penerima,
-    npwp_penerima: raw.npwpPenerima || raw.npwp_penerima,
-    status: raw.status || "ARRIVED",
+    nomor_aju: raw.nomorAju,
+    kode_status: raw.kodeStatus ?? null,
+    kode_respon: raw.kodeRespon ?? null,
+    nomor_daftar: raw.nomorDaftar ?? null,
+    tanggal_daftar: raw.tanggalDaftar ?? null,
+    waktu_status: raw.waktuStatus ?? null,
+    keterangan: raw.keterangan ?? null,
+    pesan: Array.isArray(raw.pesan)
+      ? raw.pesan.join("; ")
+      : (raw.pesan ?? null),
     metadata: raw,
-    synced_at: new Date().toISOString(),
     source: "CEISA",
+    synced_at: new Date().toISOString(),
   };
 }
 
+/**
+ * Transform monitoring data for ceisa_monitoring table
+ */
+function transformMonitoringRecord(input: {
+  nomorAju: string;
+  jenisDokumen: string;
+  submitAt: string;
+  statusResponse?: any;
+  retryCount?: number;
+  lastRetryAt?: string;
+  errorMessage?: string;
+}): any {
+  const status = input.statusResponse;
+
+  return {
+    nomor_aju: input.nomorAju,
+    jenis_dokumen: input.jenisDokumen,
+
+    tanggal_pengajuan: input.submitAt,
+    tanggal_respon_ceisa: status?.waktuStatus ?? null,
+
+    status_terakhir: status?.kodeStatus ?? null,
+    kode_respon: status?.kodeRespon ?? null,
+
+    pesan_respon: Array.isArray(status?.pesan)
+      ? status.pesan.join("; ")
+      : (status?.pesan ?? null),
+
+    keterangan_penolakan:
+      status?.kodeRespon === "REJECTED" ? status?.keterangan : null,
+
+    jumlah_retry: input.retryCount ?? 0,
+    retry_terakhir: input.lastRetryAt ?? null,
+
+    error_message: input.errorMessage ?? null,
+
+    metadata: { status },
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// future use – not from CEISA response
+// These transforms are prepared for potential future CEISA API expansion
+// Currently, PKBSI and Kendaraan data must be entered locally, not synced from CEISA
+
+/*
 function transformPkbsi(raw: any): any {
   return {
     nomor_aju: raw.nomorAju || raw.nomor_aju,
     nomor_dokumen: raw.nomorDokumen || raw.nomor_dokumen,
     tanggal_dokumen: raw.tanggalDokumen || raw.tanggal_dokumen,
-    jenis_barang_strategis:
-      raw.jenisBarangStrategis || raw.jenis_barang_strategis,
+    jenis_barang_strategis: raw.jenisBarangStrategis || raw.jenis_barang_strategis,
     hs_code: raw.hsCode || raw.hs_code,
     uraian_barang: raw.uraianBarang || raw.uraian_barang,
     jumlah: raw.jumlah || 0,
     satuan: raw.satuan,
-    nilai_barang: raw.nilaiBarang || raw.nilai_barang || 0,
-    mata_uang: raw.mataUang || raw.mata_uang || "USD",
-    negara_asal: raw.negaraAsal || raw.negara_asal,
-    nama_eksportir: raw.namaEksportir || raw.nama_eksportir,
-    nama_importir: raw.namaImportir || raw.nama_importir,
-    npwp_importir: raw.npwpImportir || raw.npwp_importir,
-    instansi_pengawas: raw.instansiPengawas || raw.instansi_pengawas,
-    nomor_rekomendasi: raw.nomorRekomendasi || raw.nomor_rekomendasi,
-    tanggal_rekomendasi: raw.tanggalRekomendasi || raw.tanggal_rekomendasi,
-    masa_berlaku_rekomendasi:
-      raw.masaBerlakuRekomendasi || raw.masa_berlaku_rekomendasi,
-    kategori_lartas: raw.kategoriLartas || raw.kategori_lartas,
-    status_lartas: raw.statusLartas || raw.status_lartas,
-    keterangan: raw.keterangan,
     status: raw.status || "PENDING",
     metadata: raw,
     synced_at: new Date().toISOString(),
-    source: "CEISA",
+    source: "LOCAL",
   };
 }
 
@@ -268,861 +299,658 @@ function transformKendaraan(raw: any): any {
   return {
     nomor_aju: raw.nomorAju || raw.nomor_aju,
     nomor_pib: raw.nomorPib || raw.nomor_pib,
-    tanggal_pib: raw.tanggalPib || raw.tanggal_pib,
     jenis_kendaraan: raw.jenisKendaraan || raw.jenis_kendaraan,
     merek: raw.merek,
     tipe: raw.tipe,
-    tahun_pembuatan: raw.tahunPembuatan || raw.tahun_pembuatan,
     nomor_rangka: raw.nomorRangka || raw.nomor_rangka,
     nomor_mesin: raw.nomorMesin || raw.nomor_mesin,
-    kapasitas_mesin: raw.kapasitasMesin || raw.kapasitas_mesin,
-    warna: raw.warna,
-    jumlah_roda: raw.jumlahRoda || raw.jumlah_roda,
-    jumlah_silinder: raw.jumlahSilinder || raw.jumlah_silinder,
-    jumlah_penumpang: raw.jumlahPenumpang || raw.jumlah_penumpang,
-    bahan_bakar: raw.bahanBakar || raw.bahan_bakar,
-    kondisi: raw.kondisi,
-    nilai_cif: raw.nilaiCif || raw.nilai_cif || 0,
-    mata_uang: raw.mataUang || raw.mata_uang || "USD",
-    bea_masuk: raw.beaMasuk || raw.bea_masuk || 0,
-    ppn: raw.ppn || 0,
-    ppnbm: raw.ppnbm || 0,
-    pph: raw.pph || 0,
-    nama_importir: raw.namaImportir || raw.nama_importir,
-    npwp_importir: raw.npwpImportir || raw.npwp_importir,
-    negara_asal: raw.negaraAsal || raw.negara_asal,
-    pelabuhan_muat: raw.pelabuhanMuat || raw.pelabuhan_muat,
-    pelabuhan_bongkar: raw.pelabuhanBongkar || raw.pelabuhan_bongkar,
     status: raw.status || "PENDING",
     metadata: raw,
     synced_at: new Date().toISOString(),
-    source: "CEISA",
+    source: "LOCAL",
   };
 }
+*/
 
-function transformMonitoring(raw: any): any {
-  return {
-    nomor_aju: raw.nomorAju || raw.nomor_aju,
-    jenis_dokumen: raw.jenisDokumen || raw.jenis_dokumen,
-    tanggal_pengajuan: raw.tanggalPengajuan || raw.tanggal_pengajuan,
-    tanggal_kirim_ceisa: raw.tanggalKirimCeisa || raw.tanggal_kirim_ceisa,
-    tanggal_respon_ceisa: raw.tanggalResponCeisa || raw.tanggal_respon_ceisa,
-    waktu_respon_detik: raw.waktuResponDetik || raw.waktu_respon_detik,
-    status_terakhir: raw.statusTerakhir || raw.status_terakhir,
-    status_detail: raw.statusDetail || raw.status_detail,
-    kode_respon: raw.kodeRespon || raw.kode_respon,
-    pesan_respon: raw.pesanRespon || raw.pesan_respon,
-    keterangan_penolakan: raw.keteranganPenolakan || raw.keterangan_penolakan,
-    alasan_penolakan: raw.alasanPenolakan || raw.alasan_penolakan,
-    saran_perbaikan: raw.saranPerbaikan || raw.saran_perbaikan,
-    nomor_response: raw.nomorResponse || raw.nomor_response,
-    nama_petugas: raw.namaPetugas || raw.nama_petugas,
-    kantor_pabean: raw.kantorPabean || raw.kantor_pabean,
-    jumlah_retry: raw.jumlahRetry || raw.jumlah_retry || 0,
-    retry_terakhir: raw.retryTerakhir || raw.retry_terakhir,
-    metadata: raw,
-    updated_at: new Date().toISOString(),
-  };
-}
+// ========== DATABASE FUNCTIONS ==========
 
-// ========== UPSERT FUNCTIONS ==========
-
+/**
+ * Simplified upsert function
+ * Uses single upsert call without pre-check select
+ */
 async function upsertToTable(
   tableName: string,
-  data: any[],
-  conflictColumn: string = "nomor_aju",
-): Promise<{ inserted: number; updated: number; errors: string[] }> {
-  const errors: string[] = [];
-  let inserted = 0;
-  let updated = 0;
+  data: any | any[],
+  onConflict: string = "nomor_aju",
+): Promise<{ affected: number; error?: string }> {
+  const records = Array.isArray(data) ? data : [data];
 
-  if (data.length === 0) {
-    return { inserted, updated, errors };
+  if (!records.length) {
+    return { affected: 0 };
   }
 
+  const { error, count } = await supabase.from(tableName).upsert(records, {
+    onConflict,
+    count: "exact",
+  });
+
+  if (error) {
+    console.error(`Upsert error (${tableName}):`, error);
+    return { affected: 0, error: error.message };
+  }
+
+  return { affected: count ?? records.length };
+}
+
+// ========== PIB DOCUMENT OPERATIONS ==========
+
+/**
+ * Save PIB as draft locally
+ * This is the first step before submitting to CEISA
+ */
+export async function savePibDraft(payload: any): Promise<SaveResult> {
   try {
-    // Check existing records using the correct conflict column
-    const keyList = data.map((d) => d[conflictColumn]).filter(Boolean);
+    const data = transformPibFromPayload(payload);
+    data.status = "DRAFT";
 
-    let existingSet = new Set<string>();
+    const result = await upsertToTable("pib_documents", data);
 
-    if (keyList.length > 0) {
-      const { data: existing } = await supabase
-        .from(tableName)
-        .select(conflictColumn)
-        .in(conflictColumn, keyList);
+    if (result.error) {
+      return { success: false, error: result.error };
+    }
 
-      existingSet = new Set(
-        (existing || []).map((e: any) => e[conflictColumn]),
+    return {
+      success: true,
+      nomorAju: payload.nomorAju,
+    };
+  } catch (err: any) {
+    console.error("Error saving PIB draft:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Submit PIB to CEISA
+ * Flow:
+ * 1. Save payload locally as SUBMITTED status
+ * 2. POST to CEISA /openapi/document?isFinal=true
+ * 3. Get nomorAju from response
+ * 4. Update local record with CEISA response
+ */
+export async function submitPib(payload: any): Promise<SubmitResult> {
+  const submitAt = new Date().toISOString();
+
+  try {
+    // 1. Update local status to SUBMITTED
+    const data = transformPibFromPayload(payload);
+    data.status = "SUBMITTED";
+    data.ceisa_submitted_at = submitAt;
+
+    await upsertToTable("pib_documents", data);
+
+    // 2. Submit to CEISA
+    const ceisaResult = await callCeisaApi(
+      "/openapi/document?isFinal=true",
+      "POST",
+      payload,
+    );
+
+    if (!ceisaResult.success) {
+      // Update status to FAILED
+      await supabase
+        .from("pib_documents")
+        .update({
+          status: "FAILED",
+          ceisa_error: ceisaResult.error,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("nomor_aju", payload.nomorAju);
+
+      // Log to monitoring
+      await upsertToTable(
+        "ceisa_monitoring",
+        transformMonitoringRecord({
+          nomorAju: payload.nomorAju,
+          jenisDokumen: "PIB",
+          submitAt,
+          errorMessage: ceisaResult.error,
+        }),
       );
+
+      return {
+        success: false,
+        nomorAju: payload.nomorAju,
+        message: "Gagal mengirim ke CEISA",
+        error: ceisaResult.error,
+      };
     }
 
-    // Perform upsert
-    const { data: result, error } = await supabase
-      .from(tableName)
-      .upsert(data, { onConflict: conflictColumn })
-      .select();
+    // 3. Extract nomorAju from response
+    const responseNomorAju = ceisaResult.data?.nomorAju || payload.nomorAju;
 
-    if (error) {
-      errors.push(`${tableName}: ${error.message}`);
-    } else {
-      data.forEach((d) => {
-        if (existingSet.has(d[conflictColumn])) {
-          updated++;
-        } else {
-          inserted++;
-        }
-      });
-    }
-  } catch (error: any) {
-    errors.push(`${tableName}: ${error.message}`);
+    // 4. Update local record with CEISA response
+    await supabase
+      .from("pib_documents")
+      .update({
+        nomor_aju: responseNomorAju,
+        ceisa_response: ceisaResult.data,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("nomor_aju", payload.nomorAju);
+
+    // Log to monitoring
+    await upsertToTable(
+      "ceisa_monitoring",
+      transformMonitoringRecord({
+        nomorAju: responseNomorAju,
+        jenisDokumen: "PIB",
+        submitAt,
+      }),
+    );
+
+    return {
+      success: true,
+      nomorAju: responseNomorAju,
+      message: "PIB berhasil dikirim ke CEISA",
+      rawResponse: ceisaResult.data,
+    };
+  } catch (err: any) {
+    console.error("Error submitting PIB:", err);
+    return {
+      success: false,
+      nomorAju: payload.nomorAju,
+      message: "Error saat mengirim PIB",
+      error: err.message,
+    };
   }
-
-  return { inserted, updated, errors };
 }
 
-// ========== MOCK DATA GENERATORS ==========
-
-function generateMockPibData(): any[] {
-  return [
-    {
-      nomorAju: `PIB-${Date.now()}-001`,
-      tanggalAju: new Date().toISOString().split("T")[0],
-      nomorPendaftaran: `000001-000001-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-000001`,
-      tanggalPendaftaran: new Date().toISOString().split("T")[0],
-      importirNpwp: "01.234.567.8-901.000",
-      importirNama: "PT Import Sejahtera",
-      importirAlamat: "Jl. Industri No. 123, Jakarta",
-      totalNilaiPabean: 150000000,
-      totalBeaMasuk: 15000000,
-      totalPpn: 16500000,
-      totalPph: 3750000,
-      status: "APPROVED",
-    },
-    {
-      nomorAju: `PIB-${Date.now()}-002`,
-      tanggalAju: new Date(Date.now() - 86400000).toISOString().split("T")[0],
-      nomorPendaftaran: `000001-000001-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-000002`,
-      tanggalPendaftaran: new Date(Date.now() - 86400000)
-        .toISOString()
-        .split("T")[0],
-      importirNpwp: "02.345.678.9-012.000",
-      importirNama: "PT Jaya Makmur",
-      importirAlamat: "Jl. Pelabuhan No. 45, Surabaya",
-      totalNilaiPabean: 280000000,
-      totalBeaMasuk: 28000000,
-      totalPpn: 30800000,
-      totalPph: 7000000,
-      status: "SUBMITTED",
-    },
-  ];
-}
-
-function generateMockPebData(): any[] {
-  return [
-    {
-      nomorAju: `PEB-${Date.now()}-001`,
-      tanggalAju: new Date().toISOString().split("T")[0],
-      nomorPendaftaran: `000002-000001-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-000001`,
-      tanggalPendaftaran: new Date().toISOString().split("T")[0],
-      eksportirNpwp: "01.234.567.8-901.000",
-      eksportirNama: "PT Ekspor Nusantara",
-      eksportirAlamat: "Jl. Ekspor No. 88, Jakarta",
-      totalNilaiFob: 500000,
-      negaraTujuan: "AMERIKA SERIKAT",
-      pelabuhanMuat: "IDTPP - Tanjung Priok",
-      status: "APPROVED",
-    },
-  ];
-}
-
-function generateMockManifestData(): any[] {
-  return [
-    {
-      nomorAju: `MN-${Date.now()}-001`,
-      nomorManifest: `MF-2025-${Date.now()}`,
-      tanggalManifest: new Date().toISOString().split("T")[0],
-      namaKapal: "MV SINAR JAYA",
-      bendera: "Indonesia",
-      voyageNumber: "VY-2025-001",
-      pelabuhanAsal: "CNSHA - Shanghai",
-      pelabuhanTujuan: "IDTPP - Tanjung Priok",
-      tanggalTiba: new Date().toISOString().split("T")[0],
-      jumlahKontainer: 5,
-      jumlahKemasan: 250,
-      beratKotor: 12500.0,
-      beratBersih: 11800.0,
-      satuanBerat: "KG",
-      jenisKemasan: "CARTON BOX",
-      namaPengirim: "Shanghai Trading Co., Ltd",
-      namaPenerima: "PT Import Indonesia",
-      npwpPenerima: "01.234.567.8-901.000",
-      status: "ARRIVED",
-    },
-  ];
-}
-
-function generateMockPkbsiData(): any[] {
-  return [
-    {
-      nomorAju: `PKBSI-${Date.now()}-001`,
-      nomorDokumen: `PKBSI-DOC-2025-001`,
-      tanggalDokumen: new Date().toISOString().split("T")[0],
-      jenisBarangStrategis: "BAHAN KIMIA BERBAHAYA",
-      hsCode: "2811.29.00",
-      uraianBarang: "HYDROGEN PEROXIDE 60%",
-      jumlah: 5000,
-      satuan: "KG",
-      nilaiBarang: 25000.0,
-      mataUang: "USD",
-      negaraAsal: "JEPANG",
-      namaEksportir: "Tokyo Chemical Industries",
-      namaImportir: "PT Kimia Industri Indonesia",
-      npwpImportir: "02.345.678.9-012.000",
-      instansiPengawas: "KEMENDAG",
-      nomorRekomendasi: "RK-KEMENDAG-2025-015",
-      tanggalRekomendasi: new Date(Date.now() - 1728000000)
-        .toISOString()
-        .split("T")[0],
-      masaBerlakuRekomendasi: new Date(Date.now() + 17280000000)
-        .toISOString()
-        .split("T")[0],
-      kategoriLartas: "BAHAN_KIMIA",
-      statusLartas: "APPROVED",
-      keterangan: "Untuk keperluan industri farmasi",
-      status: "CLEARED",
-    },
-  ];
-}
-
-function generateMockKendaraanData(): any[] {
-  return [
-    {
-      nomorAju: `KND-${Date.now()}-001`,
-      nomorPib: `PIB-KND-${Date.now()}`,
-      tanggalPib: new Date().toISOString().split("T")[0],
-      jenisKendaraan: "SEDAN",
-      merek: "TOYOTA",
-      tipe: "CAMRY 2.5 V",
-      tahunPembuatan: 2024,
-      nomorRangka: "MR053B4K8N1234567",
-      nomorMesin: "2AR-FE1234567",
-      kapasitasMesin: 2494,
-      warna: "PUTIH MUTIARA",
-      jumlahRoda: 4,
-      jumlahSilinder: 4,
-      jumlahPenumpang: 5,
-      bahanBakar: "BENSIN",
-      kondisi: "BARU",
-      nilaiCif: 35000.0,
-      mataUang: "USD",
-      beaMasuk: 17500000,
-      ppn: 5775000,
-      ppnbm: 17500000,
-      pph: 2625000,
-      namaImportir: "PT Auto Import Indonesia",
-      npwpImportir: "01.234.567.8-901.000",
-      negaraAsal: "JEPANG",
-      pelabuhanMuat: "JPYOK - Yokohama",
-      pelabuhanBongkar: "IDTPP - Tanjung Priok",
-      status: "CLEARED",
-    },
-  ];
-}
-
-function generateMockMonitoringData(): any[] {
-  return [
-    {
-      nomorAju: `PIB-${Date.now()}-001`,
-      jenisDokumen: "PIB",
-      tanggalPengajuan: new Date(Date.now() - 172800000).toISOString(),
-      tanggalKirimCeisa: new Date(Date.now() - 172700000).toISOString(),
-      tanggalResponCeisa: new Date(Date.now() - 172500000).toISOString(),
-      waktuResponDetik: 200,
-      statusTerakhir: "APPROVED",
-      statusDetail: "Dokumen telah disetujui",
-      kodeRespon: "200",
-      pesanRespon: "OK - Document approved",
-      keteranganPenolakan: null,
-      alasanPenolakan: null,
-      saranPerbaikan: null,
-      nomorResponse: "RSP-2025-001",
-      namaPetugas: "Budi Santoso",
-      kantorPabean: "KPU BC Tipe A Tanjung Priok",
-      jumlahRetry: 0,
-      retryTerakhir: null,
-    },
-    {
-      nomorAju: `PIB-${Date.now()}-002`,
-      jenisDokumen: "PIB",
-      tanggalPengajuan: new Date(Date.now() - 86400000).toISOString(),
-      tanggalKirimCeisa: new Date(Date.now() - 86300000).toISOString(),
-      tanggalResponCeisa: new Date(Date.now() - 86000000).toISOString(),
-      waktuResponDetik: 300,
-      statusTerakhir: "REJECTED",
-      statusDetail: "Dokumen ditolak karena data tidak lengkap",
-      kodeRespon: "400",
-      pesanRespon: "Error - Incomplete data",
-      keteranganPenolakan: "Data importir tidak lengkap",
-      alasanPenolakan: "NPWP tidak valid",
-      saranPerbaikan:
-        "Periksa kembali NPWP importir dan pastikan sesuai format",
-      nomorResponse: "RSP-2025-002",
-      namaPetugas: "Siti Rahayu",
-      kantorPabean: "KPU BC Tipe A Tanjung Priok",
-      jumlahRetry: 2,
-      retryTerakhir: new Date(Date.now() - 43200000).toISOString(),
-    },
-    {
-      nomorAju: `PIB-${Date.now()}-003`,
-      jenisDokumen: "PIB",
-      tanggalPengajuan: new Date().toISOString(),
-      tanggalKirimCeisa: new Date().toISOString(),
-      tanggalResponCeisa: null,
-      waktuResponDetik: null,
-      statusTerakhir: "PENDING",
-      statusDetail: "Menunggu respon dari CEISA",
-      kodeRespon: null,
-      pesanRespon: null,
-      keteranganPenolakan: null,
-      alasanPenolakan: null,
-      saranPerbaikan: null,
-      nomorResponse: null,
-      namaPetugas: null,
-      kantorPabean: "KPU BC Tipe A Tanjung Priok",
-      jumlahRetry: 0,
-      retryTerakhir: null,
-    },
-  ];
-}
-
-// ========== SYNC INDIVIDUAL TABLES ==========
-
-export async function syncPibDocuments(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  // Try to fetch from CEISA API
-  const apiResult = await callCeisaApi<any>("/pib/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    // Use mock data
-    source = "MOCK";
-    rawData = generateMockPibData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  // Transform data
-  const transformedData = rawData.map(transformPibDocument);
-
-  // Upsert to database
-  const upsertResult = await upsertToTable("pib_documents", transformedData);
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "pib_documents",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-export async function syncPebDocuments(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/peb/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    rawData = generateMockPebData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  const transformedData = rawData.map(transformPebDocument);
-  const upsertResult = await upsertToTable("peb_documents", transformedData);
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "peb_documents",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-export async function syncManifests(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/manifest/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    rawData = generateMockManifestData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  const transformedData = rawData.map(transformManifest);
-  const upsertResult = await upsertToTable("ceisa_manifests", transformedData);
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "ceisa_manifests",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-export async function syncPkbsi(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/pkbsi/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    rawData = generateMockPkbsiData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  const transformedData = rawData.map(transformPkbsi);
-  const upsertResult = await upsertToTable("ceisa_pkbsi", transformedData);
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "ceisa_pkbsi",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-export async function syncKendaraan(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/kendaraan/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    rawData = generateMockKendaraanData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  const transformedData = rawData.map(transformKendaraan);
-  const upsertResult = await upsertToTable("ceisa_vehicles", transformedData);
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "ceisa_vehicles",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-export async function syncMonitoring(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/monitoring/browse");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    rawData = generateMockMonitoringData();
-    if (apiResult.error) errors.push(`API: ${apiResult.error}`);
-  }
-
-  const transformedData = rawData.map(transformMonitoring);
-  const upsertResult = await upsertToTable("ceisa_monitoring", transformedData);
-
-  // Create notifications for status changes
-  if (upsertResult.inserted > 0 || upsertResult.updated > 0) {
-    await createStatusChangeNotifications(transformedData);
-  }
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "ceisa_monitoring",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-// Sync Customs Offices (Master Data)
-export async function syncCustomsOffices(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/master/customs-offices");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    // Generate mock data based on migration seed
-    rawData = [
-      {
-        code: "IDCGK",
-        name: "KPU Bea Cukai Soekarno-Hatta",
-        type: "AIR",
-        city: "Tangerang",
-        province: "Banten",
-      },
-      {
-        code: "IDTPP",
-        name: "KPU Bea Cukai Tanjung Priok",
-        type: "SEA",
-        city: "Jakarta",
-        province: "DKI Jakarta",
-      },
-      {
-        code: "IDSUB",
-        name: "KPU Bea Cukai Tanjung Perak",
-        type: "SEA",
-        city: "Surabaya",
-        province: "Jawa Timur",
-      },
-      {
-        code: "IDJKT",
-        name: "Kanwil DJBC Jakarta",
-        type: "MIXED",
-        city: "Jakarta",
-        province: "DKI Jakarta",
-      },
-      {
-        code: "IDBPN",
-        name: "KPU Bea Cukai Balikpapan",
-        type: "SEA",
-        city: "Balikpapan",
-        province: "Kalimantan Timur",
-      },
-      {
-        code: "IDMES",
-        name: "KPU Bea Cukai Belawan",
-        type: "SEA",
-        city: "Medan",
-        province: "Sumatera Utara",
-      },
-      {
-        code: "IDDPS",
-        name: "KPU Bea Cukai Ngurah Rai",
-        type: "AIR",
-        city: "Denpasar",
-        province: "Bali",
-      },
-      {
-        code: "IDUPG",
-        name: "KPU Bea Cukai Makassar",
-        type: "SEA",
-        city: "Makassar",
-        province: "Sulawesi Selatan",
-      },
-    ];
-    if (apiResult.error)
-      errors.push(`API: ${apiResult.error} - Using seed data`);
-  }
-
-  const transformedData = rawData.map((item: any) => ({
-    code: item.code || item.kode,
-    name: item.name || item.nama,
-    type: item.type || item.jenis || "MIXED",
-    city: item.city || item.kota || null,
-    province: item.province || item.provinsi || null,
-    address: item.address || item.alamat || null,
-    is_active: item.is_active !== undefined ? item.is_active : true,
-    source: source === "CEISA" ? "ceisa_sync" : "seed_djbc",
-  }));
-
-  const upsertResult = await upsertToTable(
-    "customs_offices",
-    transformedData,
-    "code",
-  );
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "customs_offices",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-// Sync HS Codes (Master Data)
-export async function syncHSCodes(): Promise<SyncResult> {
-  const syncedAt = new Date().toISOString();
-  const errors: string[] = [];
-  let source: "CEISA" | "MOCK" = "CEISA";
-  let rawData: any[] = [];
-
-  const apiResult = await callCeisaApi<any>("/master/hs-codes");
-
-  if (apiResult.success && apiResult.data.length > 0) {
-    rawData = apiResult.data;
-  } else {
-    source = "MOCK";
-    // Generate mock HS codes data
-    rawData = [
-      {
-        code: "0101210000",
-        name: "Live horses, pure-bred breeding animals",
-        description: "Kuda murni untuk bibit",
-        bm_rate: 0,
-        ppn_rate: 11,
-        pph_rate: 2.5,
-        unit: "HEAD",
-      },
-      {
-        code: "0201100000",
-        name: "Carcasses and half-carcasses of bovine animals, fresh or chilled",
-        description: "Karkas sapi, segar atau dingin",
-        bm_rate: 5,
-        ppn_rate: 11,
-        pph_rate: 2.5,
-        unit: "KG",
-      },
-      {
-        code: "0301110000",
-        name: "Live ornamental fish - Freshwater",
-        description: "Ikan hias air tawar hidup",
-        bm_rate: 0,
-        ppn_rate: 11,
-        pph_rate: 2.5,
-        unit: "KG",
-      },
-      {
-        code: "0401200000",
-        name: "Milk and cream, not concentrated, fat content > 1% but ≤ 6%",
-        description: "Susu dan krim, tidak dipekatkan",
-        bm_rate: 5,
-        ppn_rate: 11,
-        pph_rate: 2.5,
-        unit: "LTR",
-      },
-      {
-        code: "0713320000",
-        name: "Small red (adzuki) beans, dried shelled",
-        description: "Kacang merah kecil kering tanpa kulit",
-        bm_rate: 0,
-        ppn_rate: 11,
-        pph_rate: 2.5,
-        unit: "KG",
-      },
-    ];
-    if (apiResult.error)
-      errors.push(`API: ${apiResult.error} - Using sample data`);
-  }
-
-  const transformedData = rawData.map((item: any) => ({
-    code: item.code || item.hs_code,
-    name: item.name || item.description?.substring(0, 255) || null,
-    description: item.description || item.name || "",
-    description_id: item.description_id || item.description || null,
-    bm_rate: item.bm_rate !== undefined ? item.bm_rate : 0,
-    ppn_rate: item.ppn_rate !== undefined ? item.ppn_rate : 11,
-    pph_rate: item.pph_rate !== undefined ? item.pph_rate : 0,
-    unit: item.unit || item.satuan || "KG",
-    is_active: item.is_active !== undefined ? item.is_active : true,
-  }));
-
-  const upsertResult = await upsertToTable("hs_codes", transformedData, "code");
-
-  return {
-    success: errors.length === 0 && upsertResult.errors.length === 0,
-    table: "hs_codes",
-    inserted: upsertResult.inserted,
-    updated: upsertResult.updated,
-    errors: [...errors, ...upsertResult.errors],
-    synced_at: syncedAt,
-    source,
-  };
-}
-
-// Helper to create notifications after sync
-async function createStatusChangeNotifications(data: any[]) {
+/**
+ * Sync/poll PIB status from CEISA
+ * Calls GET /openapi/status/:nomorAju
+ */
+export async function syncPibStatus(
+  nomorAju: string,
+): Promise<SyncStatusResult> {
   try {
-    const notifications = data
-      .filter((d) => d.status_terakhir)
-      .map((d) => ({
-        type: "STATUS_CHANGE",
-        title: getStatusTitle(d.status_terakhir),
-        message: `${d.jenis_dokumen || "Dokumen"} ${d.nomor_aju} ${getStatusMessage(d.status_terakhir)}`,
-        reference_type: "ceisa_monitoring",
-        reference_id: d.nomor_aju,
-        nomor_aju: d.nomor_aju,
-        new_status: d.status_terakhir,
-        metadata: {
-          jenis_dokumen: d.jenis_dokumen,
-          kantor_pabean: d.kantor_pabean,
-          keterangan_penolakan: d.keterangan_penolakan,
-        },
-      }));
+    // Get current status from database
+    const { data: currentDoc } = await supabase
+      .from("pib_documents")
+      .select("status")
+      .eq("nomor_aju", nomorAju)
+      .single();
 
-    if (notifications.length > 0) {
-      await supabase.from("notifications").insert(notifications);
+    const previousStatus = currentDoc?.status;
+
+    // Poll CEISA for status
+    const ceisaResult = await callCeisaApi<any>(
+      `/openapi/status/${nomorAju}`,
+      "GET",
+    );
+
+    if (!ceisaResult.success) {
+      return {
+        success: false,
+        nomorAju,
+        previousStatus,
+        affected: 0,
+        error: ceisaResult.error,
+      };
     }
+
+    const statusData = transformCeisaStatus(ceisaResult.data);
+    const newStatus = mapCeisaStatusToLocal(statusData.kode_status);
+
+    // Update PIB document status
+    const { error: updateError } = await supabase
+      .from("pib_documents")
+      .update({
+        status: newStatus,
+        registration_number: statusData.nomor_daftar,
+        registration_date: statusData.tanggal_daftar,
+        ceisa_status: statusData.kode_status,
+        ceisa_response_code: statusData.kode_respon,
+        ceisa_message: statusData.pesan,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("nomor_aju", nomorAju);
+
+    if (updateError) {
+      return {
+        success: false,
+        nomorAju,
+        previousStatus,
+        affected: 0,
+        error: updateError.message,
+      };
+    }
+
+    // Update monitoring table
+    await upsertToTable(
+      "ceisa_monitoring",
+      transformMonitoringRecord({
+        nomorAju,
+        jenisDokumen: "PIB",
+        submitAt: new Date().toISOString(),
+        statusResponse: ceisaResult.data,
+      }),
+    );
+
+    // Create notification if status changed
+    if (previousStatus !== newStatus) {
+      await createStatusNotification(nomorAju, "PIB", newStatus);
+    }
+
+    return {
+      success: true,
+      nomorAju,
+      previousStatus,
+      newStatus,
+      affected: 1,
+    };
+  } catch (err: any) {
+    console.error("Error syncing PIB status:", err);
+    return {
+      success: false,
+      nomorAju,
+      affected: 0,
+      error: err.message,
+    };
+  }
+}
+
+// ========== PEB DOCUMENT OPERATIONS ==========
+
+/**
+ * Save PEB as draft locally
+ */
+export async function savePebDraft(payload: any): Promise<SaveResult> {
+  try {
+    const data = transformPebFromPayload(payload);
+    data.status = "DRAFT";
+
+    const result = await upsertToTable("peb_documents", data);
+
+    if (result.error) {
+      return { success: false, error: result.error };
+    }
+
+    return {
+      success: true,
+      nomorAju: payload.nomorAju,
+    };
+  } catch (err: any) {
+    console.error("Error saving PEB draft:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Submit PEB to CEISA
+ */
+export async function submitPeb(payload: any): Promise<SubmitResult> {
+  const submitAt = new Date().toISOString();
+
+  try {
+    // 1. Update local status to SUBMITTED
+    const data = transformPebFromPayload(payload);
+    data.status = "SUBMITTED";
+    data.ceisa_submitted_at = submitAt;
+
+    await upsertToTable("peb_documents", data);
+
+    // 2. Submit to CEISA
+    const ceisaResult = await callCeisaApi(
+      "/openapi/document?isFinal=true",
+      "POST",
+      payload,
+    );
+
+    if (!ceisaResult.success) {
+      // Update status to FAILED
+      await supabase
+        .from("peb_documents")
+        .update({
+          status: "FAILED",
+          ceisa_error: ceisaResult.error,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("nomor_aju", payload.nomorAju);
+
+      // Log to monitoring
+      await upsertToTable(
+        "ceisa_monitoring",
+        transformMonitoringRecord({
+          nomorAju: payload.nomorAju,
+          jenisDokumen: "PEB",
+          submitAt,
+          errorMessage: ceisaResult.error,
+        }),
+      );
+
+      return {
+        success: false,
+        nomorAju: payload.nomorAju,
+        message: "Gagal mengirim ke CEISA",
+        error: ceisaResult.error,
+      };
+    }
+
+    // 3. Extract nomorAju from response
+    const responseNomorAju = ceisaResult.data?.nomorAju || payload.nomorAju;
+
+    // 4. Update local record with CEISA response
+    await supabase
+      .from("peb_documents")
+      .update({
+        nomor_aju: responseNomorAju,
+        ceisa_response: ceisaResult.data,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("nomor_aju", payload.nomorAju);
+
+    // Log to monitoring
+    await upsertToTable(
+      "ceisa_monitoring",
+      transformMonitoringRecord({
+        nomorAju: responseNomorAju,
+        jenisDokumen: "PEB",
+        submitAt,
+      }),
+    );
+
+    return {
+      success: true,
+      nomorAju: responseNomorAju,
+      message: "PEB berhasil dikirim ke CEISA",
+      rawResponse: ceisaResult.data,
+    };
+  } catch (err: any) {
+    console.error("Error submitting PEB:", err);
+    return {
+      success: false,
+      nomorAju: payload.nomorAju,
+      message: "Error saat mengirim PEB",
+      error: err.message,
+    };
+  }
+}
+
+/**
+ * Sync/poll PEB status from CEISA
+ */
+export async function syncPebStatus(
+  nomorAju: string,
+): Promise<SyncStatusResult> {
+  try {
+    // Get current status from database
+    const { data: currentDoc } = await supabase
+      .from("peb_documents")
+      .select("status")
+      .eq("nomor_aju", nomorAju)
+      .single();
+
+    const previousStatus = currentDoc?.status;
+
+    // Poll CEISA for status
+    const ceisaResult = await callCeisaApi<any>(
+      `/openapi/status/${nomorAju}`,
+      "GET",
+    );
+
+    if (!ceisaResult.success) {
+      return {
+        success: false,
+        nomorAju,
+        previousStatus,
+        affected: 0,
+        error: ceisaResult.error,
+      };
+    }
+
+    const statusData = transformCeisaStatus(ceisaResult.data);
+    const newStatus = mapCeisaStatusToLocal(statusData.kode_status);
+
+    // Update PEB document status
+    const { error: updateError } = await supabase
+      .from("peb_documents")
+      .update({
+        status: newStatus,
+        registration_number: statusData.nomor_daftar,
+        registration_date: statusData.tanggal_daftar,
+        ceisa_status: statusData.kode_status,
+        ceisa_response_code: statusData.kode_respon,
+        ceisa_message: statusData.pesan,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("nomor_aju", nomorAju);
+
+    if (updateError) {
+      return {
+        success: false,
+        nomorAju,
+        previousStatus,
+        affected: 0,
+        error: updateError.message,
+      };
+    }
+
+    // Update monitoring table
+    await upsertToTable(
+      "ceisa_monitoring",
+      transformMonitoringRecord({
+        nomorAju,
+        jenisDokumen: "PEB",
+        submitAt: new Date().toISOString(),
+        statusResponse: ceisaResult.data,
+      }),
+    );
+
+    // Create notification if status changed
+    if (previousStatus !== newStatus) {
+      await createStatusNotification(nomorAju, "PEB", newStatus);
+    }
+
+    return {
+      success: true,
+      nomorAju,
+      previousStatus,
+      newStatus,
+      affected: 1,
+    };
+  } catch (err: any) {
+    console.error("Error syncing PEB status:", err);
+    return {
+      success: false,
+      nomorAju,
+      affected: 0,
+      error: err.message,
+    };
+  }
+}
+
+// ========== BATCH STATUS SYNC ==========
+
+/**
+ * Sync status for all pending/submitted documents
+ * Polls CEISA for each document that hasn't reached final status
+ */
+export async function syncAllPendingStatuses(): Promise<{
+  success: boolean;
+  pibSynced: number;
+  pebSynced: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let pibSynced = 0;
+  let pebSynced = 0;
+
+  try {
+    // Get pending PIB documents
+    const { data: pendingPibs } = await supabase
+      .from("pib_documents")
+      .select("nomor_aju")
+      .in("status", ["SUBMITTED", "PENDING", "UNDER_REVIEW"]);
+
+    // Get pending PEB documents
+    const { data: pendingPebs } = await supabase
+      .from("peb_documents")
+      .select("nomor_aju")
+      .in("status", ["SUBMITTED", "PENDING", "UNDER_REVIEW"]);
+
+    // Sync PIB statuses
+    for (const pib of pendingPibs || []) {
+      const result = await syncPibStatus(pib.nomor_aju);
+      if (result.success) {
+        pibSynced++;
+      } else if (result.error) {
+        errors.push(`PIB ${pib.nomor_aju}: ${result.error}`);
+      }
+    }
+
+    // Sync PEB statuses
+    for (const peb of pendingPebs || []) {
+      const result = await syncPebStatus(peb.nomor_aju);
+      if (result.success) {
+        pebSynced++;
+      } else if (result.error) {
+        errors.push(`PEB ${peb.nomor_aju}: ${result.error}`);
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      pibSynced,
+      pebSynced,
+      errors,
+    };
+  } catch (err: any) {
+    console.error("Error syncing pending statuses:", err);
+    return {
+      success: false,
+      pibSynced,
+      pebSynced,
+      errors: [err.message],
+    };
+  }
+}
+
+// ========== HELPER FUNCTIONS ==========
+
+/**
+ * Map CEISA status code to local status enum
+ */
+function mapCeisaStatusToLocal(ceisaStatus: string | null): string {
+  if (!ceisaStatus) return "PENDING";
+
+  const statusMap: Record<string, string> = {
+    "00": "PENDING", // Waiting
+    "01": "SUBMITTED", // Received
+    "02": "UNDER_REVIEW", // Processing
+    "03": "APPROVED", // Accepted
+    "04": "REJECTED", // Rejected
+    "05": "CANCELLED", // Cancelled
+    PENDING: "PENDING",
+    SUBMITTED: "SUBMITTED",
+    APPROVED: "APPROVED",
+    REJECTED: "REJECTED",
+    CANCELLED: "CANCELLED",
+  };
+
+  return statusMap[ceisaStatus] || "PENDING";
+}
+
+/**
+ * Create notification for status change
+ */
+async function createStatusNotification(
+  nomorAju: string,
+  jenisDokumen: string,
+  newStatus: string,
+): Promise<void> {
+  try {
+    const notification = {
+      type: "STATUS_CHANGE",
+      title: getStatusTitle(newStatus),
+      message: `${jenisDokumen} ${nomorAju} ${getStatusMessage(newStatus)}`,
+      reference_type: jenisDokumen.toLowerCase(),
+      reference_id: nomorAju,
+      nomor_aju: nomorAju,
+      new_status: newStatus,
+      metadata: { jenisDokumen },
+    };
+
+    await supabase.from("notifications").insert(notification);
   } catch (error) {
-    console.error("Error creating notifications:", error);
+    console.error("Error creating notification:", error);
   }
 }
 
 function getStatusTitle(status: string): string {
-  switch (status) {
-    case "APPROVED":
-      return "Dokumen Disetujui CEISA";
-    case "REJECTED":
-      return "Dokumen Ditolak CEISA";
-    case "SUBMITTED":
-      return "Dokumen Terkirim ke CEISA";
-    case "PENDING":
-      return "Dokumen Menunggu Review";
-    default:
-      return "Status Dokumen Berubah";
-  }
+  const titles: Record<string, string> = {
+    APPROVED: "Dokumen Disetujui CEISA",
+    REJECTED: "Dokumen Ditolak CEISA",
+    SUBMITTED: "Dokumen Terkirim ke CEISA",
+    PENDING: "Dokumen Menunggu Review",
+    UNDER_REVIEW: "Dokumen Sedang Diproses",
+    FAILED: "Pengiriman Gagal",
+    CANCELLED: "Dokumen Dibatalkan",
+  };
+  return titles[status] || "Status Dokumen Berubah";
 }
 
 function getStatusMessage(status: string): string {
-  switch (status) {
-    case "APPROVED":
-      return "telah disetujui CEISA";
-    case "REJECTED":
-      return "ditolak oleh CEISA";
-    case "SUBMITTED":
-      return "berhasil dikirim ke CEISA";
-    case "PENDING":
-      return "sedang menunggu review";
-    default:
-      return `status berubah menjadi ${status}`;
-  }
+  const messages: Record<string, string> = {
+    APPROVED: "telah disetujui CEISA",
+    REJECTED: "ditolak oleh CEISA",
+    SUBMITTED: "berhasil dikirim ke CEISA",
+    PENDING: "sedang menunggu review",
+    UNDER_REVIEW: "sedang diproses CEISA",
+    FAILED: "gagal dikirim ke CEISA",
+    CANCELLED: "telah dibatalkan",
+  };
+  return messages[status] || `status berubah menjadi ${status}`;
 }
 
-// ========== SYNC ALL ==========
+// ========== LEGACY COMPATIBILITY (DEPRECATED) ==========
 
-export async function syncCeisaDocuments(): Promise<SyncAllResult> {
-  const startTime = Date.now();
-  const results: SyncResult[] = [];
-
-  // Run all syncs in parallel
-  const [
-    pibResult,
-    pebResult,
-    manifestResult,
-    pkbsiResult,
-    kendaraanResult,
-    monitoringResult,
-    customsOfficesResult,
-    hsCodesResult,
-  ] = await Promise.all([
-    syncPibDocuments(),
-    syncPebDocuments(),
-    syncManifests(),
-    syncPkbsi(),
-    syncKendaraan(),
-    syncMonitoring(),
-    syncCustomsOffices(),
-    syncHSCodes(),
-  ]);
-
-  results.push(
-    pibResult,
-    pebResult,
-    manifestResult,
-    pkbsiResult,
-    kendaraanResult,
-    monitoringResult,
-    customsOfficesResult,
-    hsCodesResult,
+/**
+ * @deprecated Use submitPib or submitPeb instead
+ * This function is kept for backward compatibility only
+ */
+export async function syncCeisaDocuments(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  console.warn(
+    "syncCeisaDocuments is deprecated. CEISA 4.0 is a submission system, not a browse/pull API. Use submitPib/submitPeb to submit documents and syncPibStatus/syncPebStatus to poll status.",
   );
 
-  const total_inserted = results.reduce((sum, r) => sum + r.inserted, 0);
-  const total_updated = results.reduce((sum, r) => sum + r.updated, 0);
-  const duration_ms = Date.now() - startTime;
-  const success = results.every((r) => r.success);
+  // Just sync pending statuses as that's the only valid "sync" operation
+  const result = await syncAllPendingStatuses();
 
   return {
-    success,
-    results,
-    total_inserted,
-    total_updated,
-    duration_ms,
+    success: result.success,
+    message: `Synced ${result.pibSynced} PIB and ${result.pebSynced} PEB statuses${
+      result.errors.length ? `. Errors: ${result.errors.join(", ")}` : ""
+    }`,
   };
 }
 
-// ========== SELECTIVE SYNC ==========
+/**
+ * @deprecated Not applicable in CEISA 4.0 architecture
+ */
+export async function syncCeisaByTable(tableName: string): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  console.warn(
+    `syncCeisaByTable(${tableName}) is deprecated. CEISA 4.0 does not provide browse/pull endpoints.`,
+  );
 
-export async function syncCeisaByTable(tableName: string): Promise<SyncResult> {
-  switch (tableName) {
-    case "pib_documents":
-      return syncPibDocuments();
-    case "peb_documents":
-      return syncPebDocuments();
-    case "ceisa_manifests":
-      return syncManifests();
-    case "ceisa_pkbsi":
-      return syncPkbsi();
-    case "ceisa_kendaraan":
-      return syncKendaraan();
-    case "ceisa_monitoring":
-      return syncMonitoring();
-    case "ceisa_vehicles":
-      return syncKendaraan();
-    case "customs_offices":
-      return syncCustomsOffices();
-    case "hs_codes":
-      return syncHSCodes();
-    default:
-      return {
-        success: false,
-        table: tableName,
-        inserted: 0,
-        updated: 0,
-        errors: [`Unknown table: ${tableName}`],
-        synced_at: new Date().toISOString(),
-        source: "MOCK",
-      };
-  }
+  return {
+    success: false,
+    message:
+      "CEISA 4.0 is a document submission system. Use submitPib/submitPeb to submit documents.",
+  };
 }
