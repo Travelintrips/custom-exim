@@ -17,37 +17,55 @@ export type Database = {
       audit_logs: {
         Row: {
           action: string
+          actor_id: string | null
           after_data: Json | null
           before_data: Json | null
           created_at: string | null
+          description: string | null
           document_number: string
           document_type: string
+          entity_id: string | null
+          entity_number: string | null
+          entity_type: string | null
           id: string
           ip_address: string | null
+          notes: string | null
           user_email: string | null
           user_id: string | null
         }
         Insert: {
           action: string
+          actor_id?: string | null
           after_data?: Json | null
           before_data?: Json | null
           created_at?: string | null
+          description?: string | null
           document_number: string
           document_type: string
+          entity_id?: string | null
+          entity_number?: string | null
+          entity_type?: string | null
           id?: string
           ip_address?: string | null
+          notes?: string | null
           user_email?: string | null
           user_id?: string | null
         }
         Update: {
           action?: string
+          actor_id?: string | null
           after_data?: Json | null
           before_data?: Json | null
           created_at?: string | null
+          description?: string | null
           document_number?: string
           document_type?: string
+          entity_id?: string | null
+          entity_number?: string | null
+          entity_type?: string | null
           id?: string
           ip_address?: string | null
+          notes?: string | null
           user_email?: string | null
           user_id?: string | null
         }
@@ -730,6 +748,7 @@ export type Database = {
           effective_date: string | null
           email: string | null
           id: string
+          importer_api: string | null
           is_active: boolean | null
           name: string
           npwp: string | null
@@ -750,6 +769,7 @@ export type Database = {
           effective_date?: string | null
           email?: string | null
           id?: string
+          importer_api?: string | null
           is_active?: boolean | null
           name: string
           npwp?: string | null
@@ -770,6 +790,7 @@ export type Database = {
           effective_date?: string | null
           email?: string | null
           id?: string
+          importer_api?: string | null
           is_active?: boolean | null
           name?: string
           npwp?: string | null
@@ -887,6 +908,36 @@ export type Database = {
           updated_by?: string | null
         }
         Relationships: []
+      }
+      customs_office_ports: {
+        Row: {
+          customs_office_id: string
+          port_id: string
+        }
+        Insert: {
+          customs_office_id: string
+          port_id: string
+        }
+        Update: {
+          customs_office_id?: string
+          port_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customs_office_ports_customs_office_id_fkey"
+            columns: ["customs_office_id"]
+            isOneToOne: false
+            referencedRelation: "customs_offices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customs_office_ports_port_id_fkey"
+            columns: ["port_id"]
+            isOneToOne: false
+            referencedRelation: "ports"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customs_offices: {
         Row: {
@@ -1107,6 +1158,48 @@ export type Database = {
           name?: string
           updated_at?: string | null
           updated_by?: string | null
+        }
+        Relationships: []
+      }
+      kantor_pabean: {
+        Row: {
+          address: string | null
+          city: string | null
+          code: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          province: string | null
+          source: string | null
+          type: string
+          updated_at: string | null
+        }
+        Insert: {
+          address?: string | null
+          city?: string | null
+          code: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          province?: string | null
+          source?: string | null
+          type: string
+          updated_at?: string | null
+        }
+        Update: {
+          address?: string | null
+          city?: string | null
+          code?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          province?: string | null
+          source?: string | null
+          type?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -1537,7 +1630,7 @@ export type Database = {
             foreignKeyName: "peb_documents_customs_office_id_fkey"
             columns: ["customs_office_id"]
             isOneToOne: false
-            referencedRelation: "ports"
+            referencedRelation: "customs_offices"
             referencedColumns: ["id"]
           },
           {
@@ -1786,6 +1879,8 @@ export type Database = {
       }
       pib_documents: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           bl_awb_date: string | null
           bl_awb_number: string | null
           ceisa_last_error: string | null
@@ -1793,6 +1888,7 @@ export type Database = {
           ceisa_response_at: string | null
           ceisa_retry_count: number | null
           ceisa_submitted_at: string | null
+          cif_value_idr: string | null
           created_at: string | null
           created_by: string | null
           currency_code: string | null
@@ -1814,12 +1910,10 @@ export type Database = {
           importer_id: string | null
           importer_name: string | null
           importer_npwp: string | null
-          importir_alamat: string | null
-          importir_nama: string | null
-          importir_npwp: string | null
           incoterm_code: string | null
           incoterm_id: string | null
           insurance_value: number | null
+          jenis_dokumen: string | null
           lane: Database["public"]["Enums"]["pib_lane"] | null
           loading_country: string | null
           loading_port_code: string | null
@@ -1829,13 +1923,13 @@ export type Database = {
           locked_at: string | null
           locked_by: string | null
           metadata: Json | null
-          nama_importir: string | null
           net_weight: number | null
           nilai_cif: number | null
           nomor_aju: string | null
           nomor_pendaftaran: string | null
           notes: string | null
           package_unit: string | null
+          pelabuhan_tujuan_id: string | null
           ppjk_id: string | null
           ppjk_name: string | null
           ppjk_npwp: string | null
@@ -1854,7 +1948,6 @@ export type Database = {
           synced_at: string | null
           tanggal_aju: string | null
           tanggal_pendaftaran: string | null
-          total_bea_masuk: number | null
           total_bm: number | null
           total_cif_idr: number | null
           total_cif_value: number | null
@@ -1872,6 +1965,8 @@ export type Database = {
           xml_hash: string | null
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           bl_awb_date?: string | null
           bl_awb_number?: string | null
           ceisa_last_error?: string | null
@@ -1879,6 +1974,7 @@ export type Database = {
           ceisa_response_at?: string | null
           ceisa_retry_count?: number | null
           ceisa_submitted_at?: string | null
+          cif_value_idr?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1900,12 +1996,10 @@ export type Database = {
           importer_id?: string | null
           importer_name?: string | null
           importer_npwp?: string | null
-          importir_alamat?: string | null
-          importir_nama?: string | null
-          importir_npwp?: string | null
           incoterm_code?: string | null
           incoterm_id?: string | null
           insurance_value?: number | null
+          jenis_dokumen?: string | null
           lane?: Database["public"]["Enums"]["pib_lane"] | null
           loading_country?: string | null
           loading_port_code?: string | null
@@ -1915,13 +2009,13 @@ export type Database = {
           locked_at?: string | null
           locked_by?: string | null
           metadata?: Json | null
-          nama_importir?: string | null
           net_weight?: number | null
           nilai_cif?: number | null
           nomor_aju?: string | null
           nomor_pendaftaran?: string | null
           notes?: string | null
           package_unit?: string | null
+          pelabuhan_tujuan_id?: string | null
           ppjk_id?: string | null
           ppjk_name?: string | null
           ppjk_npwp?: string | null
@@ -1940,7 +2034,6 @@ export type Database = {
           synced_at?: string | null
           tanggal_aju?: string | null
           tanggal_pendaftaran?: string | null
-          total_bea_masuk?: number | null
           total_bm?: number | null
           total_cif_idr?: number | null
           total_cif_value?: number | null
@@ -1958,6 +2051,8 @@ export type Database = {
           xml_hash?: string | null
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           bl_awb_date?: string | null
           bl_awb_number?: string | null
           ceisa_last_error?: string | null
@@ -1965,6 +2060,7 @@ export type Database = {
           ceisa_response_at?: string | null
           ceisa_retry_count?: number | null
           ceisa_submitted_at?: string | null
+          cif_value_idr?: string | null
           created_at?: string | null
           created_by?: string | null
           currency_code?: string | null
@@ -1986,12 +2082,10 @@ export type Database = {
           importer_id?: string | null
           importer_name?: string | null
           importer_npwp?: string | null
-          importir_alamat?: string | null
-          importir_nama?: string | null
-          importir_npwp?: string | null
           incoterm_code?: string | null
           incoterm_id?: string | null
           insurance_value?: number | null
+          jenis_dokumen?: string | null
           lane?: Database["public"]["Enums"]["pib_lane"] | null
           loading_country?: string | null
           loading_port_code?: string | null
@@ -2001,13 +2095,13 @@ export type Database = {
           locked_at?: string | null
           locked_by?: string | null
           metadata?: Json | null
-          nama_importir?: string | null
           net_weight?: number | null
           nilai_cif?: number | null
           nomor_aju?: string | null
           nomor_pendaftaran?: string | null
           notes?: string | null
           package_unit?: string | null
+          pelabuhan_tujuan_id?: string | null
           ppjk_id?: string | null
           ppjk_name?: string | null
           ppjk_npwp?: string | null
@@ -2026,7 +2120,6 @@ export type Database = {
           synced_at?: string | null
           tanggal_aju?: string | null
           tanggal_pendaftaran?: string | null
-          total_bea_masuk?: number | null
           total_bm?: number | null
           total_cif_idr?: number | null
           total_cif_value?: number | null
@@ -2045,6 +2138,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "pib_documents_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "pib_documents_currency_id_fkey"
             columns: ["currency_id"]
             isOneToOne: false
@@ -2055,7 +2155,7 @@ export type Database = {
             foreignKeyName: "pib_documents_customs_office_id_fkey"
             columns: ["customs_office_id"]
             isOneToOne: false
-            referencedRelation: "ports"
+            referencedRelation: "customs_offices"
             referencedColumns: ["id"]
           },
           {
@@ -2087,6 +2187,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "pib_documents_locked_by_fkey"
+            columns: ["locked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pib_documents_pelabuhan_tujuan_id_fkey"
+            columns: ["pelabuhan_tujuan_id"]
+            isOneToOne: false
+            referencedRelation: "ports"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "pib_documents_ppjk_id_fkey"
             columns: ["ppjk_id"]
             isOneToOne: false
@@ -2094,10 +2208,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "pib_documents_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "pib_documents_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pib_documents_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -2281,9 +2409,6 @@ export type Database = {
           country_id: string | null
           created_at: string | null
           created_by: string | null
-          customs_office: string | null
-          customs_office_code: string | null
-          customs_office_id: string | null
           id: string
           is_active: boolean | null
           name: string
@@ -2300,9 +2425,6 @@ export type Database = {
           country_id?: string | null
           created_at?: string | null
           created_by?: string | null
-          customs_office?: string | null
-          customs_office_code?: string | null
-          customs_office_id?: string | null
           id?: string
           is_active?: boolean | null
           name: string
@@ -2319,9 +2441,6 @@ export type Database = {
           country_id?: string | null
           created_at?: string | null
           created_by?: string | null
-          customs_office?: string | null
-          customs_office_code?: string | null
-          customs_office_id?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
@@ -2338,13 +2457,6 @@ export type Database = {
             columns: ["country_id"]
             isOneToOne: false
             referencedRelation: "countries"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ports_customs_office_id_fkey"
-            columns: ["customs_office_id"]
-            isOneToOne: false
-            referencedRelation: "customs_offices"
             referencedColumns: ["id"]
           },
         ]
@@ -2452,6 +2564,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       status_counts_cache: {
         Row: {
@@ -2639,7 +2778,7 @@ export type Database = {
           image: string | null
           name: string | null
           role: Database["public"]["Enums"]["user_role"] | null
-          token_identifier: string
+          token_identifier: string | null
           updated_at: string | null
           user_id: string | null
         }
@@ -2652,7 +2791,7 @@ export type Database = {
           image?: string | null
           name?: string | null
           role?: Database["public"]["Enums"]["user_role"] | null
-          token_identifier: string
+          token_identifier?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
@@ -2665,7 +2804,7 @@ export type Database = {
           image?: string | null
           name?: string | null
           role?: Database["public"]["Enums"]["user_role"] | null
-          token_identifier?: string
+          token_identifier?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
@@ -2806,11 +2945,14 @@ export type Database = {
       pib_status:
         | "DRAFT"
         | "SUBMITTED"
+        | "VALIDATED"
+        | "APPROVED"
         | "SENT_TO_PPJK"
         | "CEISA_ACCEPTED"
         | "CEISA_REJECTED"
         | "SPPB_ISSUED"
         | "COMPLETED"
+        | "SYNCED"
       user_role:
         | "export_staff"
         | "import_staff"
@@ -2957,11 +3099,14 @@ export const Constants = {
       pib_status: [
         "DRAFT",
         "SUBMITTED",
+        "VALIDATED",
+        "APPROVED",
         "SENT_TO_PPJK",
         "CEISA_ACCEPTED",
         "CEISA_REJECTED",
         "SPPB_ISSUED",
         "COMPLETED",
+        "SYNCED",
       ],
       user_role: [
         "export_staff",

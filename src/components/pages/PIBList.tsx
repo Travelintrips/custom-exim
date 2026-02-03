@@ -133,6 +133,7 @@ export default function PIBList() {
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncParams, setSyncParams] = useState({
     nomorAju: "",
+    documentNumber: "",
     npwpImportir: "",
     kodeKantor: "",
   });
@@ -218,7 +219,26 @@ export default function PIBList() {
     try {
       const { data, error: fetchError } = await supabase
         .from("pib_documents")
-        .select("*")
+        .select(
+          `
+        id,
+        jenis_dokumen,
+        tanggal_aju,
+        importer_name,
+        nilai_cif,
+        status,
+        created_at,
+        updated_at,
+        created_by,
+        updated_by,
+        created_by_profile:profiles!pib_documents_created_by_fkey (
+          full_name
+        ),
+        updated_by_profile:profiles!pib_documents_updated_by_fkey (
+          full_name
+        )
+      `,
+        )
         .order("created_at", { ascending: false });
 
       if (fetchError) {
@@ -228,21 +248,28 @@ export default function PIBList() {
         return;
       }
 
-      // Map CEISA columns to UI format
       const transformedData: PIBDocument[] = (data || []).map((doc) => {
         const status = mapPIBStatus(doc.status);
 
         return {
           id: doc.id,
-          documentNumber: doc.nomor_aju, // NO fallback
+          jenisDokumen: doc.jenis_dokumen,
           date: formatDate(doc.tanggal_aju),
-          importerName: doc.nama_importir,
+          importerName: doc.importer_name,
           totalValue: doc.nilai_cif,
           status,
-          createdBy: doc.created_by || "system",
+
+          createdBy: doc.created_by_profile?.full_name ?? "System",
+
           createdAt: formatDateTime(doc.created_at),
+
           lastAction: status === "draft" ? "Created" : "Synced from CEISA",
-          lastActionBy: doc.updated_by || "system",
+
+          lastActionBy:
+            doc.updated_by_profile?.full_name ??
+            doc.created_by_profile?.full_name ??
+            "System",
+
           lastActionAt: formatDateTime(doc.updated_at || doc.created_at),
         };
       });
@@ -301,15 +328,15 @@ export default function PIBList() {
 
   const columns: Column<PIBDocument>[] = [
     {
-      id: "documentNumber",
-      header: "Document Number",
-      accessor: "documentNumber",
+      id: "jenisDokumen",
+      header: "Jenis Dokumen",
+      accessor: "jenisDokumen",
       className: "font-mono text-xs",
     },
     {
-      id: "date",
+      id: "createdAt",
       header: "Date",
-      accessor: "date",
+      accessor: "createdAt",
     },
     {
       id: "importerName",

@@ -119,29 +119,38 @@ async function callCeisaApi<T = any>(
   }
 }
 
-// ========== CONNECTION TEST ==========
-
-/**
- * Test connection to CEISA API
- */
 export async function testCeisaConnection(): Promise<{
   success: boolean;
   message: string;
   details?: any;
 }> {
-  const result = await callCeisaApi("__test__", "GET");
+  const { data, error } = await supabase.functions.invoke(
+    "supabase-functions-ceisa-proxy",
+    {
+      body: {
+        action: "health_check",
+      },
+    },
+  );
 
-  if (result.success) {
+  if (error) {
+    return {
+      success: false,
+      message: error.message,
+    };
+  }
+
+  if (data?.success) {
     return {
       success: true,
       message: "CEISA Connected",
-      details: result.data,
+      details: data,
     };
   }
 
   return {
     success: false,
-    message: result.error || "CEISA Terputus",
+    message: data?.error || "CEISA Terputus",
   };
 }
 

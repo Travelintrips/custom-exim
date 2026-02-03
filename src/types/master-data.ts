@@ -10,8 +10,9 @@ export interface BaseMasterData {
 }
 
 export interface Company extends BaseMasterData {
-  type: 'exporter' | 'importer' | 'both';
+  type: "eksportir" | "importir" | "both";
   npwp: string | null;
+  importer_api: string | null;
   address: string | null;
   city: string | null;
   country: string | null;
@@ -23,7 +24,7 @@ export interface Company extends BaseMasterData {
 }
 
 export interface Warehouse extends BaseMasterData {
-  type: 'TPS' | 'PLB' | 'KB' | 'OTHER';
+  type: "TPS" | "PLB" | "KB" | "OTHER";
   address: string | null;
   city: string | null;
   customs_office: string | null;
@@ -77,7 +78,7 @@ export interface Country extends BaseMasterData {
 
 export interface Port extends BaseMasterData {
   country_code: string | null;
-  type: 'SEA' | 'AIR' | 'LAND';
+  type: "SEA" | "AIR" | "LAND";
   customs_office: string | null;
 }
 
@@ -105,7 +106,7 @@ export interface MasterDataHistory {
   id: string;
   table_name: string;
   record_id: string;
-  action: 'CREATE' | 'UPDATE' | 'DELETE';
+  action: "CREATE" | "UPDATE" | "DELETE";
   before_data: Record<string, unknown> | null;
   after_data: Record<string, unknown> | null;
   changed_by: string | null;
@@ -113,194 +114,208 @@ export interface MasterDataHistory {
   changed_at: string;
 }
 
-export type MasterDataType = 
-  | 'companies' 
-  | 'warehouses' 
-  | 'suppliers' 
-  | 'buyers' 
-  | 'hs_codes' 
-  | 'products' 
-  | 'packaging' 
-  | 'countries' 
-  | 'ports' 
-  | 'incoterms' 
-  | 'currencies' 
-  | 'ppjk';
+export type MasterDataType =
+  | "companies"
+  | "warehouses"
+  | "suppliers"
+  | "buyers"
+  | "hs_codes"
+  | "products"
+  | "packaging"
+  | "countries"
+  | "ports"
+  | "incoterms"
+  | "currencies"
+  | "ppjk";
 
-export const masterDataConfig: Record<MasterDataType, { 
-  label: string; 
-  singularLabel: string;
-  fields: { key: string; label: string; type: string; required?: boolean }[];
-}> = {
+export const masterDataConfig: Record<
+  MasterDataType,
+  {
+    label: string;
+    singularLabel: string;
+    fields: { key: string; label: string; type: string; required?: boolean }[];
+  }
+> = {
   companies: {
-    label: 'Exporters/Importers',
-    singularLabel: 'Company',
+    label: "Eksportir/Importir",
+    singularLabel: "Company",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'type', label: 'Type', type: 'select', required: true },
-      { key: 'npwp', label: 'NPWP', type: 'text' },
-      { key: 'address', label: 'Address', type: 'textarea' },
-      { key: 'city', label: 'City', type: 'text' },
-      { key: 'country_id', label: 'Country', type: 'country_select' },
-      { key: 'phone', label: 'Phone', type: 'text' },
-      { key: 'email', label: 'Email', type: 'email' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "type", label: "Type", type: "select", required: true },
+      { key: "npwp", label: "NPWP", type: "text" },
+      { key: "importer_api", label: "API/NIB", type: "text" },
+      { key: "address", label: "Address", type: "textarea" },
+      { key: "city", label: "City", type: "text" },
+      { key: "country_id", label: "Country", type: "country_select" },
+      { key: "phone", label: "Phone", type: "text" },
+      { key: "email", label: "Email", type: "email" },
     ],
   },
   warehouses: {
-    label: 'Warehouses / TPS',
-    singularLabel: 'Warehouse',
+    label: "Warehouses / TPS",
+    singularLabel: "Warehouse",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'type', label: 'Type', type: 'select', required: true },
-      { key: 'address', label: 'Address', type: 'textarea' },
-      { key: 'city', label: 'City', type: 'text' },
-      { key: 'customs_office', label: 'Customs Office', type: 'text' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "type", label: "Type", type: "select", required: true },
+      { key: "address", label: "Address", type: "textarea" },
+      { key: "city", label: "City", type: "text" },
+      { key: "customs_office", label: "Customs Office", type: "text" },
     ],
   },
   suppliers: {
-    label: 'Suppliers',
-    singularLabel: 'Supplier',
+    label: "Suppliers",
+    singularLabel: "Supplier",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'country', label: 'Country', type: 'text' },
-      { key: 'address', label: 'Address', type: 'textarea' },
-      { key: 'phone', label: 'Phone', type: 'text' },
-      { key: 'email', label: 'Email', type: 'email' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "country", label: "Country", type: "text" },
+      { key: "address", label: "Address", type: "textarea" },
+      { key: "phone", label: "Phone", type: "text" },
+      { key: "email", label: "Email", type: "email" },
     ],
   },
   buyers: {
-    label: 'Buyers',
-    singularLabel: 'Buyer',
+    label: "Buyers",
+    singularLabel: "Buyer",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'country', label: 'Country', type: 'text' },
-      { key: 'address', label: 'Address', type: 'textarea' },
-      { key: 'phone', label: 'Phone', type: 'text' },
-      { key: 'email', label: 'Email', type: 'email' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "country", label: "Country", type: "text" },
+      { key: "address", label: "Address", type: "textarea" },
+      { key: "phone", label: "Phone", type: "text" },
+      { key: "email", label: "Email", type: "email" },
     ],
   },
   hs_codes: {
-    label: 'HS Codes',
-    singularLabel: 'HS Code',
+    label: "HS Codes",
+    singularLabel: "HS Code",
     fields: [
-      { key: 'code', label: 'HS Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text' },
-      { key: 'description', label: 'Description (EN)', type: 'textarea', required: true },
-      { key: 'description_id', label: 'Description (ID)', type: 'textarea' },
-      { key: 'bm_rate', label: 'BM Rate (%)', type: 'number' },
-      { key: 'ppn_rate', label: 'PPN Rate (%)', type: 'number' },
-      { key: 'pph_rate', label: 'PPh Rate (%)', type: 'number' },
-      { 
-        key: 'unit', 
-        label: 'Unit', 
-        type: 'select', 
-        options: [
-          { value: 'UNIT', label: 'UNIT' },
-          { value: 'PCS', label: 'PCS' },
-          { value: 'SET', label: 'SET' },
-          { value: 'KG', label: 'KG' },
-          { value: 'LTR', label: 'LTR' },
-          { value: 'MTR', label: 'MTR' },
-          { value: 'TON', label: 'TON' },
-          { value: 'DOZ', label: 'DOZ' },
-          { value: 'PAK', label: 'PAK' },
-          { value: 'BOX', label: 'BOX' },
-          { value: 'CTN', label: 'CTN' },
-          { value: 'M2', label: 'M2' },
-          { value: 'M3', label: 'M3' },
-        ]
+      { key: "code", label: "HS Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text" },
+      {
+        key: "description",
+        label: "Description (EN)",
+        type: "textarea",
+        required: true,
       },
-      { key: 'is_restricted', label: 'Restricted', type: 'checkbox' },
+      { key: "description_id", label: "Description (ID)", type: "textarea" },
+      { key: "bm_rate", label: "BM Rate (%)", type: "number" },
+      { key: "ppn_rate", label: "PPN Rate (%)", type: "number" },
+      { key: "pph_rate", label: "PPh Rate (%)", type: "number" },
+      {
+        key: "unit",
+        label: "Unit",
+        type: "select",
+        options: [
+          { value: "UNIT", label: "UNIT" },
+          { value: "PCS", label: "PCS" },
+          { value: "SET", label: "SET" },
+          { value: "KG", label: "KG" },
+          { value: "LTR", label: "LTR" },
+          { value: "MTR", label: "MTR" },
+          { value: "TON", label: "TON" },
+          { value: "DOZ", label: "DOZ" },
+          { value: "PAK", label: "PAK" },
+          { value: "BOX", label: "BOX" },
+          { value: "CTN", label: "CTN" },
+          { value: "M2", label: "M2" },
+          { value: "M3", label: "M3" },
+        ],
+      },
+      { key: "is_restricted", label: "Restricted", type: "checkbox" },
     ],
   },
   products: {
-    label: 'Products',
-    singularLabel: 'Product',
+    label: "Products",
+    singularLabel: "Product",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'description', label: 'Description', type: 'textarea' },
-      { key: 'hs_code_id', label: 'HS Code', type: 'select' },
-      { key: 'unit', label: 'Unit', type: 'text' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "description", label: "Description", type: "textarea" },
+      { key: "hs_code_id", label: "HS Code", type: "select" },
+      { key: "unit", label: "Unit", type: "text" },
     ],
   },
   packaging: {
-    label: 'Packaging',
-    singularLabel: 'Packaging',
+    label: "Packaging",
+    singularLabel: "Packaging",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "description", label: "Description", type: "textarea" },
     ],
   },
   countries: {
-    label: 'Countries',
-    singularLabel: 'Country',
+    label: "Countries",
+    singularLabel: "Country",
     fields: [
-      { key: 'code', label: 'ISO Alpha-2', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'name_en', label: 'Name (English)', type: 'text' },
-      { key: 'iso_alpha3', label: 'ISO Alpha-3', type: 'text' },
-      { key: 'iso_numeric', label: 'ISO Numeric', type: 'text' },
-      { key: 'region', label: 'Region', type: 'text' },
-      { key: 'sub_region', label: 'Sub Region', type: 'text' },
-      { key: 'source', label: 'Source', type: 'text' },
+      {
+        key: "code",
+        label: "Country Code ISO Alpha-2",
+        type: "text",
+        required: true,
+      },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "name_en", label: "Name (English)", type: "text" },
+      { key: "iso_alpha3", label: "ISO Alpha-3", type: "text" },
+      { key: "iso_numeric", label: "ISO Numeric", type: "text" },
+      { key: "region", label: "Region", type: "text" },
+      { key: "sub_region", label: "Sub Region", type: "text" },
+      { key: "source", label: "Source", type: "text" },
     ],
   },
   ports: {
-    label: 'Ports & Customs',
-    singularLabel: 'Port',
+    label: "Ports & Customs",
+    singularLabel: "Port",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'country_code', label: 'Country Code', type: 'text' },
-      { key: 'type', label: 'Type', type: 'select', required: true },
-      { key: 'customs_office', label: 'Customs Office', type: 'text' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "country_code", label: "Country Code", type: "text" },
+      { key: "type", label: "Type", type: "select", required: true },
+      //{ key: "customs_office", label: "Customs Office", type: "text" },
     ],
   },
   incoterms: {
-    label: 'Incoterms',
-    singularLabel: 'Incoterm',
+    label: "Incoterms",
+    singularLabel: "Incoterm",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "description", label: "Description", type: "textarea" },
     ],
   },
   currencies: {
-    label: 'Currencies',
-    singularLabel: 'Currency',
+    label: "Currencies",
+    singularLabel: "Currency",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'symbol', label: 'Symbol', type: 'text' },
-      { key: 'exchange_rate', label: 'Exchange Rate', type: 'number' },
-      { key: 'rate_date', label: 'Rate Date', type: 'date' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "symbol", label: "Symbol", type: "text" },
+      { key: "exchange_rate", label: "Exchange Rate", type: "number" },
+      { key: "rate_date", label: "Rate Date", type: "date" },
     ],
   },
   ppjk: {
-    label: 'PPJK',
-    singularLabel: 'PPJK',
+    label: "PPJK",
+    singularLabel: "PPJK",
     fields: [
-      { key: 'code', label: 'Code', type: 'text', required: true },
-      { key: 'name', label: 'Name', type: 'text', required: true },
-      { key: 'npwp', label: 'NPWP', type: 'text' },
-      { key: 'nib', label: 'NIB', type: 'text' },
-      { key: 'address', label: 'Address', type: 'textarea' },
-      { key: 'city', label: 'City', type: 'text' },
-      { key: 'phone', label: 'Phone', type: 'text' },
-      { key: 'license_number', label: 'License Number', type: 'text' },
-      { key: 'license_expiry', label: 'License Expiry', type: 'date' },
+      { key: "code", label: "Code", type: "text", required: true },
+      { key: "name", label: "Name", type: "text", required: true },
+      { key: "npwp", label: "NPWP", type: "text" },
+      { key: "nib", label: "NIB", type: "text" },
+      { key: "address", label: "Address", type: "textarea" },
+      { key: "city", label: "City", type: "text" },
+      { key: "phone", label: "Phone", type: "text" },
+      { key: "license_number", label: "License Number", type: "text" },
+      { key: "license_expiry", label: "License Expiry", type: "date" },
     ],
   },
 };
 
 export function validateHSCode(code: string): boolean {
   // HS Code should be 6-10 digits
-  const cleanCode = code.replace(/\./g, '');
+  const cleanCode = code.replace(/\./g, "");
   return /^\d{6,10}$/.test(cleanCode);
 }

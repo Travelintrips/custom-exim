@@ -19,6 +19,7 @@ import ReportsPage from "./components/pages/ReportsPage";
 import UserManagementPage from "./components/pages/UserManagementPage";
 import SettingsPage from "./components/pages/SettingsPage";
 import SingleCoreSystemPage from "./components/pages/SingleCoreSystemPage";
+import CEISASandboxTestPage from "./components/pages/CEISASandboxTestPage";
 import { AuthProvider, useAuth } from "../supabase/auth";
 import { RoleProvider, useRole } from "./hooks/useRole";
 import { Toaster } from "./components/ui/sonner";
@@ -43,7 +44,7 @@ function ProtectedRoute({
   requiredPermission 
 }: { 
   children: React.ReactNode; 
-  requiredPermission?: 'canAccessPEB' | 'canAccessPIB' | 'canAccessCEISA' | 'canAccessAuditLog' | 'canAccessMasterData' | 'canAccessReports' | 'canAccessUserManagement' | 'canAccessSettings'; 
+  requiredPermission?: 'canAccessPEB' | 'canAccessPIB' | 'canAccessCEISA' | 'canAccessAuditLog' | 'canAccessMasterData' | 'canAccessReports' | 'canAccessUserManagement' | 'canAccessSettings' | 'canAccessDebugMode'; 
 }) {
   const { user, loading: authLoading } = useAuth();
   const { permissions, loading: roleLoading } = useRole();
@@ -265,6 +266,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute requiredPermission="canAccessSettings">
             <SettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ceisa-sandbox-test"
+        element={
+          <ProtectedRoute requiredPermission="canAccessDebugMode">
+            <CEISASandboxTestPage />
           </ProtectedRoute>
         }
       />

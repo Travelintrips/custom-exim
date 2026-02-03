@@ -1,26 +1,31 @@
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { MasterDataType, masterDataConfig, validateHSCode, Country } from '@/types/master-data';
-import { AlertCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+} from "@/components/ui/dialog";
+import {
+  MasterDataType,
+  masterDataConfig,
+  validateHSCode,
+  Country,
+} from "@/types/master-data";
+import { AlertCircle } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface MasterDataFormProps {
   dataType: MasterDataType;
@@ -28,35 +33,35 @@ interface MasterDataFormProps {
   onClose: () => void;
   onSubmit: (data: Record<string, unknown>) => void;
   initialData?: Record<string, unknown> | null;
-  mode: 'create' | 'edit' | 'view';
+  mode: "create" | "edit" | "view";
 }
 
 const selectOptions: Record<string, { value: string; label: string }[]> = {
-  'companies.type': [
-    { value: 'exporter', label: 'Exporter' },
-    { value: 'importer', label: 'Importer' },
-    { value: 'both', label: 'Both' },
+  "companies.type": [
+    { value: "eksportir", label: "Eksportir" },
+    { value: "importir", label: "Importir" },
+    { value: "both", label: "Both" },
   ],
-  'warehouses.type': [
-    { value: 'TPS', label: 'TPS (Tempat Penimbunan Sementara)' },
-    { value: 'PLB', label: 'PLB (Pusat Logistik Berikat)' },
-    { value: 'KB', label: 'KB (Kawasan Berikat)' },
-    { value: 'OTHER', label: 'Other' },
+  "warehouses.type": [
+    { value: "TPS", label: "TPS (Tempat Penimbunan Sementara)" },
+    { value: "PLB", label: "PLB (Pusat Logistik Berikat)" },
+    { value: "KB", label: "KB (Kawasan Berikat)" },
+    { value: "OTHER", label: "Other" },
   ],
-  'ports.type': [
-    { value: 'SEA', label: 'Sea Port' },
-    { value: 'AIR', label: 'Airport' },
-    { value: 'LAND', label: 'Land Border' },
+  "ports.type": [
+    { value: "SEA", label: "Sea Port" },
+    { value: "AIR", label: "Airport" },
+    { value: "LAND", label: "Land Border" },
   ],
-  'hs_codes.unit': [
-    { value: 'UNIT', label: 'UNIT' },
-    { value: 'PCS', label: 'PCS' },
-    { value: 'SET', label: 'SET' },
-    { value: 'KG', label: 'KG' },
-    { value: 'LTR', label: 'LTR' },
-    { value: 'MTR', label: 'MTR' },
-    { value: 'BOX', label: 'BOX' },
-    { value: 'CTN', label: 'CTN' },
+  "hs_codes.unit": [
+    { value: "UNIT", label: "UNIT" },
+    { value: "PCS", label: "PCS" },
+    { value: "SET", label: "SET" },
+    { value: "KG", label: "KG" },
+    { value: "LTR", label: "LTR" },
+    { value: "MTR", label: "MTR" },
+    { value: "BOX", label: "BOX" },
+    { value: "CTN", label: "CTN" },
   ],
 };
 
@@ -73,17 +78,20 @@ export function MasterDataForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [countries, setCountries] = useState<Country[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(false);
+  const [generatingCode, setGeneratingCode] = useState(false);
 
   // Fetch countries for country_select fields
   useEffect(() => {
-    const hasCountryField = config.fields.some(f => f.type === 'country_select');
+    const hasCountryField = config.fields.some(
+      (f) => f.type === "country_select",
+    );
     if (hasCountryField && isOpen) {
       setLoadingCountries(true);
       supabase
-        .from('countries')
-        .select('id, code, name, name_en, is_active')
-        .eq('is_active', true)
-        .order('name_en')
+        .from("countries")
+        .select("id, code, name, name_en, is_active")
+        .eq("is_active", true)
+        .order("name_en")
         .then(({ data, error }) => {
           if (!error && data) {
             setCountries(data as Country[]);
@@ -93,6 +101,52 @@ export function MasterDataForm({
     }
   }, [config.fields, isOpen]);
 
+  // Auto-generate code for suppliers on create
+  useEffect(() => {
+    const generateSupplierCode = async () => {
+      if (dataType === "suppliers" && mode === "create" && isOpen) {
+        setGeneratingCode(true);
+        try {
+          // Get the latest supplier code
+          const { data, error } = await supabase
+            .from("suppliers")
+            .select("code")
+            .like("code", "SP%-%-____")
+            .order("code", { ascending: false })
+            .limit(1);
+
+          if (error) throw error;
+
+          // Generate new code
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = String(now.getMonth() + 1).padStart(2, "0");
+          const prefix = `SP${year}-${month}-`;
+
+          let nextNumber = 1;
+          if (data && data.length > 0) {
+            const lastCode = data[0].code;
+            // Extract the last 4 digits
+            const match = lastCode.match(/SP\d{4}-\d{2}-(\d{4})$/);
+            if (match) {
+              const lastNumber = parseInt(match[1], 10);
+              nextNumber = lastNumber + 1;
+            }
+          }
+
+          const newCode = `${prefix}${String(nextNumber).padStart(4, "0")}`;
+          setFormData((prev) => ({ ...prev, code: newCode }));
+        } catch (error) {
+          console.error("Error generating supplier code:", error);
+        } finally {
+          setGeneratingCode(false);
+        }
+      }
+    };
+
+    generateSupplierCode();
+  }, [dataType, mode, isOpen]);
+
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
@@ -100,12 +154,12 @@ export function MasterDataForm({
       } else {
         const defaultData: Record<string, unknown> = {};
         config.fields.forEach((field) => {
-          if (field.type === 'checkbox') {
+          if (field.type === "checkbox") {
             defaultData[field.key] = false;
-          } else if (field.type === 'number') {
+          } else if (field.type === "number") {
             defaultData[field.key] = 0;
           } else {
-            defaultData[field.key] = '';
+            defaultData[field.key] = "";
           }
         });
         defaultData.is_active = true;
@@ -128,7 +182,7 @@ export function MasterDataForm({
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     config.fields.forEach((field) => {
       if (field.required && !formData[field.key]) {
         newErrors[field.key] = `${field.label} is required`;
@@ -136,9 +190,9 @@ export function MasterDataForm({
     });
 
     // Special validation for HS Code
-    if (dataType === 'hs_codes' && formData.code) {
+    if (dataType === "hs_codes" && formData.code) {
       if (!validateHSCode(formData.code as string)) {
-        newErrors.code = 'HS Code must be 6-10 digits';
+        newErrors.code = "HS Code must be 6-10 digits";
       }
     }
 
@@ -147,7 +201,7 @@ export function MasterDataForm({
   };
 
   const handleSubmit = () => {
-    if (mode === 'view') {
+    if (mode === "view") {
       onClose();
       return;
     }
@@ -156,12 +210,13 @@ export function MasterDataForm({
     }
   };
 
-  const isReadOnly = mode === 'view';
-  const title = mode === 'create' 
-    ? `Add ${config.singularLabel}` 
-    : mode === 'edit' 
-    ? `Edit ${config.singularLabel}` 
-    : `View ${config.singularLabel}`;
+  const isReadOnly = mode === "view";
+  const title =
+    mode === "create"
+      ? `Add ${config.singularLabel}`
+      : mode === "edit"
+        ? `Edit ${config.singularLabel}`
+        : `View ${config.singularLabel}`;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -179,17 +234,23 @@ export function MasterDataForm({
               <div key={field.key} className="space-y-1.5">
                 <Label className="text-xs font-medium">
                   {field.label}
-                  {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                  {field.required && (
+                    <span className="text-red-500 ml-0.5">*</span>
+                  )}
                 </Label>
 
-                {field.type === 'country_select' ? (
+                {field.type === "country_select" ? (
                   <Select
-                    value={formData[field.key] as string || ''}
+                    value={(formData[field.key] as string) || ""}
                     onValueChange={(value) => handleChange(field.key, value)}
                     disabled={isReadOnly || loadingCountries}
                   >
                     <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder={loadingCountries ? 'Loading...' : 'Select country'} />
+                      <SelectValue
+                        placeholder={
+                          loadingCountries ? "Loading..." : "Select country"
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {countries.map((country) => (
@@ -199,14 +260,16 @@ export function MasterDataForm({
                       ))}
                     </SelectContent>
                   </Select>
-                ) : field.type === 'select' && options ? (
+                ) : field.type === "select" && options ? (
                   <Select
-                    value={formData[field.key] as string || ''}
+                    value={(formData[field.key] as string) || ""}
                     onValueChange={(value) => handleChange(field.key, value)}
                     disabled={isReadOnly}
                   >
                     <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
+                      <SelectValue
+                        placeholder={`Select ${field.label.toLowerCase()}`}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {options.map((opt) => (
@@ -216,35 +279,39 @@ export function MasterDataForm({
                       ))}
                     </SelectContent>
                   </Select>
-                ) : field.type === 'textarea' ? (
+                ) : field.type === "textarea" ? (
                   <Textarea
-                    value={formData[field.key] as string || ''}
+                    value={(formData[field.key] as string) || ""}
                     onChange={(e) => handleChange(field.key, e.target.value)}
                     className="text-sm min-h-[60px]"
                     disabled={isReadOnly}
                   />
-                ) : field.type === 'checkbox' ? (
+                ) : field.type === "checkbox" ? (
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={formData[field.key] as boolean || false}
-                      onCheckedChange={(checked) => handleChange(field.key, checked)}
+                      checked={(formData[field.key] as boolean) || false}
+                      onCheckedChange={(checked) =>
+                        handleChange(field.key, checked)
+                      }
                       disabled={isReadOnly}
                     />
                     <span className="text-sm text-muted-foreground">Yes</span>
                   </div>
-                ) : field.type === 'number' ? (
+                ) : field.type === "number" ? (
                   <Input
                     type="number"
                     step="0.01"
-                    value={formData[field.key] as number || 0}
-                    onChange={(e) => handleChange(field.key, parseFloat(e.target.value) || 0)}
+                    value={(formData[field.key] as number) || 0}
+                    onChange={(e) =>
+                      handleChange(field.key, parseFloat(e.target.value) || 0)
+                    }
                     className="h-8 text-sm"
                     disabled={isReadOnly}
                   />
-                ) : field.type === 'date' ? (
+                ) : field.type === "date" ? (
                   <Input
                     type="date"
-                    value={formData[field.key] as string || ''}
+                    value={(formData[field.key] as string) || ""}
                     onChange={(e) => handleChange(field.key, e.target.value)}
                     className="h-8 text-sm"
                     disabled={isReadOnly}
@@ -252,10 +319,23 @@ export function MasterDataForm({
                 ) : (
                   <Input
                     type={field.type}
-                    value={formData[field.key] as string || ''}
+                    value={(formData[field.key] as string) || ""}
                     onChange={(e) => handleChange(field.key, e.target.value)}
                     className="h-8 text-sm"
-                    disabled={isReadOnly}
+                    disabled={
+                      isReadOnly ||
+                      (dataType === "suppliers" && field.key === "code") ||
+                      (dataType === "suppliers" &&
+                        field.key === "code" &&
+                        generatingCode)
+                    }
+                    placeholder={
+                      dataType === "suppliers" &&
+                      field.key === "code" &&
+                      generatingCode
+                        ? "Generating..."
+                        : undefined
+                    }
                   />
                 )}
 
@@ -274,7 +354,9 @@ export function MasterDataForm({
             <div className="flex items-center gap-2">
               <Checkbox
                 checked={formData.is_active as boolean}
-                onCheckedChange={(checked) => handleChange('is_active', checked)}
+                onCheckedChange={(checked) =>
+                  handleChange("is_active", checked)
+                }
                 disabled={isReadOnly}
               />
               <Label className="text-sm">Active</Label>
@@ -284,11 +366,11 @@ export function MasterDataForm({
 
         <DialogFooter className="gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
-            {isReadOnly ? 'Close' : 'Cancel'}
+            {isReadOnly ? "Close" : "Cancel"}
           </Button>
           {!isReadOnly && (
             <Button size="sm" onClick={handleSubmit}>
-              {mode === 'create' ? 'Create' : 'Save Changes'}
+              {mode === "create" ? "Create" : "Save Changes"}
             </Button>
           )}
         </DialogFooter>

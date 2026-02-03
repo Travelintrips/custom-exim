@@ -1,14 +1,7 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Upload, FileText, Trash2, Download, Eye, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Upload, FileText, Trash2, Download, Eye, AlertCircle, CheckCircle2, Plus } from 'lucide-react';
 import { PIBAttachment, PIB_DOCUMENT_TYPES } from '@/types/pib';
 import { cn } from '@/lib/utils';
 
@@ -122,44 +115,69 @@ export function PIBAttachments({
         <h3 className="text-sm font-medium">Supporting Documents</h3>
       </div>
 
-      {/* Upload Area */}
+      {/* Upload Area - Document Type Buttons */}
       {!isReadOnly && (
-        <div className="flex gap-3 items-end">
-          <div className="flex-1 max-w-xs">
-            <label className="text-xs text-muted-foreground mb-1.5 block">Document Type</label>
-            <Select value={selectedType} onValueChange={setSelectedType}>
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {relevantDocTypes.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
+        <div className="space-y-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {relevantDocTypes.map((type) => {
+              const isUploaded = attachments.some(att => att.document_type === type.value) ||
+                               existingAttachments.some(att => att.document_type === type.value);
+              const isRequired = requiredDocuments.some(rd => rd.code === type.value && rd.required);
+              
+              return (
+                <button
+                  key={type.value}
+                  type="button"
+                  onClick={() => {
+                    setSelectedType(type.value);
+                    fileInputRef.current?.click();
+                  }}
+                  className={cn(
+                    "relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all text-center min-h-[80px]",
+                    "hover:border-blue-500 hover:bg-blue-50",
+                    isUploaded 
+                      ? "border-emerald-500 bg-emerald-50" 
+                      : isRequired 
+                        ? "border-amber-300 bg-amber-50/50" 
+                        : "border-slate-200 bg-white"
+                  )}
+                >
+                  {isUploaded ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600 mb-1" />
+                  ) : (
+                    <Plus className="h-5 w-5 text-slate-400 mb-1" />
+                  )}
+                  <span className={cn(
+                    "text-xs font-medium leading-tight",
+                    isUploaded ? "text-emerald-700" : "text-slate-700"
+                  )}>
                     {type.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </span>
+                  {isRequired && !isUploaded && (
+                    <Badge variant="destructive" className="text-[9px] h-4 px-1 mt-1">
+                      WAJIB
+                    </Badge>
+                  )}
+                  {isUploaded && (
+                    <span className="text-[10px] text-emerald-600 mt-0.5">Uploaded</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              className="gap-1.5"
-            >
-              <Upload size={14} />
-              Upload Files
-            </Button>
-          </div>
+          
+          <p className="text-xs text-muted-foreground text-center">
+            Klik tipe dokumen untuk upload file
+          </p>
         </div>
       )}
 
@@ -173,9 +191,9 @@ export function PIBAttachments({
                 <div className="flex items-center gap-3">
                   <FileText className="h-8 w-8 text-muted-foreground" />
                   <div>
-                    <p className="text-sm font-medium">{att.file.name}</p>
+                    <p className="text-sm font-medium">{att.file?.name || att.name || "Document"}</p>
                     <p className="text-xs text-muted-foreground">
-                      {getDocTypeName(att.document_type)} · {formatFileSize(att.file.size)}
+                      {getDocTypeName(att.document_type)} · {att.file ? formatFileSize(att.file.size) : ""}
                     </p>
                   </div>
                 </div>
@@ -235,59 +253,28 @@ export function PIBAttachments({
         </div>
       )}
 
-      {/* Required Documents Note */}
-      {!isReadOnly && (
-        <div className={cn(
-          "border rounded-lg p-3 text-xs",
-          missingRequiredDocs.length > 0
-            ? "bg-red-50 border-red-200 text-red-800"
-            : "bg-emerald-50 border-emerald-200 text-emerald-800"
-        )}>
-          <p className="font-medium mb-2 flex items-center gap-2">
-            {missingRequiredDocs.length > 0 ? (
-              <AlertCircle className="h-4 w-4" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {transportMode 
-              ? `Required Documents for PIB (${transportMode}):` 
-              : 'Required Documents for PIB:'}
-          </p>
-          <ul className="space-y-1">
-            {requiredDocuments.map((doc) => {
-              const isUploaded = attachments.some(att => att.document_type === doc.code) ||
-                                existingAttachments.some(att => att.document_type === doc.code);
-              return (
-                <li key={doc.code} className="flex items-center gap-2">
-                  {isUploaded ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  ) : (
-                    <div className="h-3.5 w-3.5 rounded-full border-2 border-current shrink-0" />
-                  )}
-                  <span className={isUploaded ? "line-through opacity-70" : ""}>{doc.label}</span>
-                  {doc.required && (
-                    <Badge variant="destructive" className="text-[10px] h-4 px-1.5">
-                      REQUIRED
-                    </Badge>
-                  )}
-                  {!doc.required && (
-                    <span className="text-[10px] text-muted-foreground">(optional)</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {missingRequiredDocs.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-red-300 flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium">Missing Required Documents:</p>
-                <p className="text-[11px] mt-0.5">
-                  {missingRequiredDocs.map(d => d.label).join(', ')}
-                </p>
-              </div>
+      {/* Missing Required Documents Warning */}
+      {!isReadOnly && missingRequiredDocs.length > 0 && (
+        <div className="border rounded-lg p-3 text-xs bg-red-50 border-red-200 text-red-800">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Dokumen Wajib Belum Lengkap:</p>
+              <p className="text-[11px] mt-0.5">
+                {missingRequiredDocs.map(d => d.label).join(', ')}
+              </p>
             </div>
-          )}
+          </div>
+        </div>
+      )}
+      
+      {/* All Required Documents Uploaded */}
+      {!isReadOnly && missingRequiredDocs.length === 0 && attachments.length + existingAttachments.length > 0 && (
+        <div className="border rounded-lg p-3 text-xs bg-emerald-50 border-emerald-200 text-emerald-800">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            <p className="font-medium">Semua dokumen wajib sudah di-upload</p>
+          </div>
         </div>
       )}
     </div>

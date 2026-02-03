@@ -95,6 +95,107 @@ Deno.serve(async (req) => {
     }
 
     // ==========================================
+    // SUBMIT DOCUMENT (PEB/PIB) TO CEISA
+    // ==========================================
+    if (action === 'submit') {
+      const { document_type, xml, metadata, document_number } = body;
+      
+      console.log('=== CEISA SUBMIT ===');
+      console.log('Document Type:', document_type);
+      console.log('Document Number:', document_number);
+      console.log('XML Length:', xml?.length || 0);
+      console.log('Has Metadata:', !!metadata);
+      
+      if (!xml) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: 'XML content is required for submission',
+            status: 'VALIDATION_ERROR',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        );
+      }
+      
+      try {
+        // Determine CEISA endpoint based on document type
+        const submitEndpoint = document_type === 'PIB' 
+          ? '/api/v1/pib/submit'  // PIB submission endpoint
+          : '/api/v1/peb/submit'; // PEB submission endpoint
+          
+        const submitUrl = `${CEISA_API_URL}${submitEndpoint}`;
+        
+        console.log('Submit URL:', submitUrl);
+        
+        // Prepare submission payload
+        const submitPayload = {
+          xml: xml,
+          document_type: document_type,
+          document_number: document_number,
+        };
+        
+        console.log('Sending to CEISA...');
+        
+        const submitResponse = await fetch(submitUrl, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': CEISA_API_KEY,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(submitPayload),
+        });
+        
+        const responseText = await submitResponse.text();
+        console.log('CEISA Response Status:', submitResponse.status);
+        console.log('CEISA Response:', responseText);
+        
+        let responseData;
+        try {
+          responseData = JSON.parse(responseText);
+        } catch {
+          responseData = { raw: responseText };
+        }
+        
+        if (submitResponse.ok && (responseData.success || responseData.code === '00' || submitResponse.status === 200)) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              status: 'ACCEPTED',
+              message: responseData.message || 'Document submitted successfully',
+              registration_number: responseData.registration_number || responseData.nomorPendaftaran || responseData.data?.registration_number,
+              raw_response: responseText.substring(0, 5000),
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+          );
+        } else {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              status: 'REJECTED',
+              message: responseData.message || responseData.error || `CEISA returned ${submitResponse.status}`,
+              error_code: responseData.code || responseData.error_code,
+              raw_response: responseText.substring(0, 5000),
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+          );
+        }
+        
+      } catch (submitError) {
+        console.error('CEISA Submit Error:', submitError);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            status: 'ERROR',
+            message: submitError.message || 'Failed to submit to CEISA',
+            error: submitError.toString(),
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        );
+      }
+    }
+
+    // ==========================================
     // REGULAR API CALLS (GET/POST)
     // ==========================================
     const queryParams = new URLSearchParams(params || {});

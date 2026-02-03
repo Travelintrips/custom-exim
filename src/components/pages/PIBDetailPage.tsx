@@ -44,6 +44,9 @@ import { useRole } from "@/hooks/useRole";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { Skeleton } from "@/components/ui/skeleton";
+import { submitPIBToCEISAFromMetadata } from "@/lib/edi/ceisa-submit";
+import { validatePIBMetadata, PIBMetadata } from "@/lib/pib/pib-metadata";
+import { createAuditLog } from "@/lib/audit/audit-logger";
 
 export default function PIBDetailPage() {
   const { id } = useParams();
@@ -59,6 +62,7 @@ export default function PIBDetailPage() {
   const [pib, setPib] = useState<PIBDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<any[]>([]);
 
   // Fetch PIB document from Supabase
   const fetchPIB = useCallback(async () => {
@@ -99,6 +103,19 @@ export default function PIBDetailPage() {
           status_history: data.pib_status_history || [],
         };
         setPib(pibDoc);
+
+        // Fetch supporting documents
+        const { data: docsData, error: docsError } = await supabase
+          .from("supporting_documents")
+          .select("*")
+          .eq("ref_type", "PIB")
+          .eq("ref_id", id);
+
+        if (docsError) {
+          console.error("Error fetching supporting documents:", docsError);
+        } else {
+          setDocuments(docsData || []);
+        }
       } else {
         setError("Document not found");
         setPib(null);
@@ -174,21 +191,183 @@ export default function PIBDetailPage() {
   const canApprove = permissions.canApproveDocs || role === "super_admin";
 
   const handleAction = async () => {
+    if (!pib || !id) return;
+
     setIsProcessing(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      const messages: Record<string, string> = {
-        approve: "Document approved and sent to CEISA",
-        reject: "Document rejected",
-        send_ppjk: "Document sent to PPJK",
-      };
+      if (actionType === "approve") {
+        // Step 1: Validate metadata exists
+        const metadata = (pib as any).metadata as PIBMetadata | undefined;
 
-      toast.success(messages[actionType]);
+        if (!metadata || Object.keys(metadata).length === 0) {
+          toast.error(
+            "Cannot approve: Metadata is empty. Please edit and save the PIB first.",
+          );
+          return;
+        }
+
+        // Step 2: Validate metadata
+        const validation = validatePIBMetadata(metadata);
+        if (!validation.isValid) {
+          toast.error(`Validation failed:\n${validation.errors.join("\n")}`);
+          return;
+        }
+
+        // Step 3: Update status to APPROVED
+        const { error: updateError } = await supabase
+          .from("pib_documents")
+          .update({
+            status: "APPROVED",
+            approved_at: new Date().toISOString(),
+            approved_by: user?.id,
+            notes: actionNotes || pib.notes,
+            updated_at: new Date().toISOString(),
+            updated_by: user?.id,
+          })
+          .eq("id", id);
+
+        if (updateError) {
+          throw new Error(`Failed to update status: ${updateError.message}`);
+        }
+
+        // Step 4: Log audit event
+        await createAuditLog({
+          action: "APPROVE",
+          entity_type: "PIB",
+          entity_id: id,
+          entity_number: pib.document_number || undefined,
+          before_data: { status: pib.status },
+          after_data: { status: "APPROVED" },
+          actor_id: user?.id,
+          notes: `PIB ${pib.document_number || id} approved`,
+        });
+
+        // Step 5: Submit to CEISA
+        toast.info("Submitting to CEISA...");
+        console.log("PIBDetailPage: Calling submitPIBToCEISAFromMetadata with id:", id);
+        console.log("PIBDetailPage: PIB metadata:", (pib as any).metadata);
+        const result = await submitPIBToCEISAFromMetadata(id);
+        console.log("PIBDetailPage: CEISA submission result:", result);
+
+        if (result.success) {
+          // Update status to sent
+          await supabase
+            .from("pib_documents")
+            .update({
+              status: "CEISA_ACCEPTED",
+              ceisa_response: JSON.stringify(result),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", id);
+
+          toast.success("Document approved and sent to CEISA successfully!");
+
+          // Log CEISA submission
+          await createAuditLog({
+            action: "SUBMIT",
+            entity_type: "PIB",
+            entity_id: id,
+            entity_number: pib.document_number || undefined,
+            after_data: {
+              registration_number: result.registration_number,
+              status: "CEISA_ACCEPTED",
+            },
+            actor_id: user?.id,
+            notes: `PIB ${pib.document_number || id} submitted to CEISA`,
+          });
+        } else {
+          // Still approved but CEISA failed
+          toast.error(
+            `Approved but CEISA submission failed: ${result.error_message}`,
+          );
+
+          // Log failed submission
+          await createAuditLog({
+            action: "SUBMIT",
+            entity_type: "PIB",
+            entity_id: id,
+            entity_number: pib.document_number || undefined,
+            after_data: {
+              error: result.error_message,
+              error_type: result.error_type,
+              status: "submission_failed",
+            },
+            actor_id: user?.id,
+            notes: `CEISA submission failed: ${result.error_message}`,
+          });
+        }
+      } else if (actionType === "reject") {
+        if (!actionNotes.trim()) {
+          toast.error("Please provide rejection reason");
+          return;
+        }
+
+        const { error: updateError } = await supabase
+          .from("pib_documents")
+          .update({
+            status: "CEISA_REJECTED",
+            notes: actionNotes,
+            updated_at: new Date().toISOString(),
+            updated_by: user?.id,
+          })
+          .eq("id", id);
+
+        if (updateError) {
+          throw new Error(`Failed to reject: ${updateError.message}`);
+        }
+
+        await createAuditLog({
+          action: "REJECT",
+          entity_type: "PIB",
+          entity_id: id,
+          entity_number: pib.document_number || undefined,
+          before_data: { status: pib.status },
+          after_data: { status: "CEISA_REJECTED", reason: actionNotes },
+          actor_id: user?.id,
+          notes: `PIB ${pib.document_number || id} rejected: ${actionNotes}`,
+        });
+
+        toast.success("Document rejected");
+      } else if (actionType === "send_ppjk") {
+        const { error: updateError } = await supabase
+          .from("pib_documents")
+          .update({
+            status: "SENT_TO_PPJK",
+            notes: actionNotes || pib.notes,
+            updated_at: new Date().toISOString(),
+            updated_by: user?.id,
+          })
+          .eq("id", id);
+
+        if (updateError) {
+          throw new Error(`Failed to send to PPJK: ${updateError.message}`);
+        }
+
+        await createAuditLog({
+          action: "UPDATE",
+          entity_type: "PIB",
+          entity_id: id,
+          entity_number: pib.document_number || undefined,
+          before_data: { status: pib.status },
+          after_data: { status: "SENT_TO_PPJK" },
+          actor_id: user?.id,
+          notes: `PIB ${pib.document_number || id} sent to PPJK for review`,
+        });
+
+        toast.success("Document sent to PPJK");
+      }
+
+      // Refresh data
+      await fetchPIB();
       setActionDialogOpen(false);
       setActionNotes("");
     } catch (error) {
-      toast.error("Action failed");
+      console.error("Action failed:", error);
+      toast.error(error instanceof Error ? error.message : "Action failed");
     } finally {
       setIsProcessing(false);
     }
@@ -617,10 +796,64 @@ export default function PIBDetailPage() {
               <TabsContent value="documents" className="mt-4">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="text-center text-muted-foreground py-8">
-                      <FileText className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No documents attached</p>
-                    </div>
+                    {documents.length > 0 ? (
+                      <div className="space-y-2">
+                        {documents.map((doc, index) => (
+                          <div
+                            key={doc.id || index}
+                            className="flex items-center justify-between p-3 border rounded-lg bg-slate-50"
+                          >
+                            <div className="flex items-center gap-3">
+                              <FileText className="h-5 w-5 text-muted-foreground" />
+                              <div>
+                                <p className="text-sm font-medium">
+                                  {doc.file_name || "Unknown file"}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {doc.doc_type === "INVOICE" &&
+                                    "Commercial Invoice"}
+                                  {doc.doc_type === "PACKING_LIST" &&
+                                    "Packing List"}
+                                  {doc.doc_type === "BL" && "Bill of Lading"}
+                                  {doc.doc_type === "AWB" && "Airway Bill"}
+                                  {doc.doc_type === "INSURANCE" &&
+                                    "Insurance Certificate"}
+                                  {doc.doc_type === "COO" &&
+                                    "Certificate of Origin"}
+                                  {doc.doc_type === "PERMIT" && "Import Permit"}
+                                  {doc.doc_type === "OTHER" && "Other Document"}
+                                  {![
+                                    "INVOICE",
+                                    "PACKING_LIST",
+                                    "BL",
+                                    "AWB",
+                                    "INSURANCE",
+                                    "COO",
+                                    "PERMIT",
+                                    "OTHER",
+                                  ].includes(doc.doc_type) && doc.doc_type}
+                                </p>
+                              </div>
+                            </div>
+                            {doc.file_url && (
+                              <a
+                                href={doc.file_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline text-sm"
+                              >
+                                View
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center text-muted-foreground py-8">
+                        <FileText className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No documents attached</p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

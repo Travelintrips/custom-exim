@@ -1,6 +1,8 @@
 export type PIBStatus =
   | "DRAFT"
   | "SUBMITTED"
+  | "VALIDATED"
+  | "APPROVED"
   | "SENT_TO_PPJK"
   | "CEISA_ACCEPTED"
   | "CEISA_REJECTED"
@@ -30,6 +32,18 @@ export const PIB_STATUS_CONFIG: Record<
     color: "bg-blue-100 text-blue-700 border-blue-300",
     description: "Submitted for review",
     isLocked: false,
+  },
+  VALIDATED: {
+    label: "VALIDATED",
+    color: "bg-cyan-100 text-cyan-700 border-cyan-300",
+    description: "Document has been validated",
+    isLocked: false,
+  },
+  APPROVED: {
+    label: "APPROVED",
+    color: "bg-emerald-100 text-emerald-700 border-emerald-300",
+    description: "Document has been approved",
+    isLocked: true,
   },
   SYNCED: {
     label: "Synced",
@@ -96,6 +110,7 @@ export const PIB_LANE_CONFIG: Record<
 
 export interface PIBDocument {
   id: string;
+  jenis_dokumen?: string | null;
   document_number: string | null;
   registration_number: string | null;
   registration_date: string | null;
@@ -164,6 +179,10 @@ export interface PIBDocument {
   notes: string | null;
   xml_content: string | null;
   ceisa_response: string | null;
+  
+  // Canonical metadata for CEISA integration
+  // This is the single source of truth for XML generation
+  metadata?: Record<string, unknown>;
 
   created_by: string | null;
   created_at: string;

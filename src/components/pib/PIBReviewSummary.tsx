@@ -403,7 +403,7 @@ export function PIBReviewSummary({ formData, items, attachments, validationError
               {attachments.map((att, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm">
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  <span>{att.file.name}</span>
+                  <span>{att.file?.name || att.name || "Document"}</span>
                   <Badge variant="outline" className="text-xs">{getDocTypeName(att.document_type)}</Badge>
                 </div>
               ))}

@@ -1,12 +1,12 @@
-import { Link, useLocation } from 'react-router-dom';
-import { 
-  Home, 
-  FileOutput, 
-  FileInput, 
-  RefreshCw, 
-  Users, 
-  Package, 
-  Anchor, 
+import { Link, useLocation } from "react-router-dom";
+import {
+  Home,
+  FileOutput,
+  FileInput,
+  RefreshCw,
+  Users,
+  Package,
+  Anchor,
   DollarSign,
   Shield,
   BarChart3,
@@ -22,21 +22,23 @@ import {
   Building2,
   Box,
   X,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useRole, getRoleLabel, UserRole } from '@/hooks/useRole';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+  FlaskConical,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useRole, getRoleLabel, UserRole } from "@/hooks/useRole";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
-type PermissionKey = 
-  | 'canAccessPEB'
-  | 'canAccessPIB'
-  | 'canAccessCEISA'
-  | 'canAccessMasterData'
-  | 'canAccessAuditLog'
-  | 'canAccessReports'
-  | 'canAccessUserManagement'
-  | 'canAccessSettings';
+type PermissionKey =
+  | "canAccessPEB"
+  | "canAccessPIB"
+  | "canAccessCEISA"
+  | "canAccessMasterData"
+  | "canAccessAuditLog"
+  | "canAccessReports"
+  | "canAccessUserManagement"
+  | "canAccessSettings"
+  | "canAccessDebugMode";
 
 interface NavItem {
   title: string;
@@ -53,56 +55,137 @@ interface NavGroup {
 
 const navigation: NavGroup[] = [
   {
-    title: 'OPERATIONS',
+    title: "OPERATIONS",
     items: [
-      { title: 'Dashboard', href: '/dashboard', icon: <Home size={18} /> },
-      { title: 'Export - PEB', href: '/peb', icon: <FileOutput size={18} />, permission: 'canAccessPEB' },
-      { title: 'Import - PIB', href: '/pib', icon: <FileInput size={18} />, permission: 'canAccessPIB' },
-      { title: 'EDI / CEISA', href: '/ceisa', icon: <RefreshCw size={18} />, permission: 'canAccessCEISA' },
+      { title: "Dashboard", href: "/dashboard", icon: <Home size={18} /> },
+      {
+        title: "Export - PEB",
+        href: "/peb",
+        icon: <FileOutput size={18} />,
+        permission: "canAccessPEB",
+      },
+      {
+        title: "Import - PIB",
+        href: "/pib",
+        icon: <FileInput size={18} />,
+        permission: "canAccessPIB",
+      },
+      {
+        title: "EDI / CEISA",
+        href: "/ceisa",
+        icon: <RefreshCw size={18} />,
+        permission: "canAccessCEISA",
+      },
     ],
   },
   {
-    title: 'SINGLE CORE',
-    permission: 'canAccessCEISA',
+    title: "SINGLE CORE",
+    permission: "canAccessCEISA",
     items: [
-      { title: 'Dokumen Pabean', href: '/single-core', icon: <FileText size={18} /> },
+      {
+        title: "Dokumen Pabean",
+        href: "/single-core",
+        icon: <FileText size={18} />,
+      },
     ],
   },
   {
-    title: 'MASTER DATA',
-    permission: 'canAccessMasterData',
+    title: "MASTER DATA",
+    permission: "canAccessMasterData",
     items: [
-      { title: 'Companies', href: '/master/companies', icon: <Building2 size={18} /> },
-      { title: 'Warehouses / TPS', href: '/master/warehouses', icon: <Warehouse size={18} /> },
-      { title: 'Suppliers', href: '/master/suppliers', icon: <Truck size={18} /> },
-      { title: 'Buyers', href: '/master/buyers', icon: <ShoppingCart size={18} /> },
-      { title: 'HS Codes', href: '/master/hs-codes', icon: <Package size={18} /> },
-      { title: 'Products', href: '/master/products', icon: <Box size={18} /> },
-      { title: 'Packaging', href: '/master/packaging', icon: <Package size={18} /> },
-      { title: 'Countries', href: '/master/countries', icon: <Globe size={18} /> },
-      { title: 'Ports', href: '/master/ports', icon: <Ship size={18} /> },
-      { title: 'Incoterms', href: '/master/incoterms', icon: <FileText size={18} /> },
-      { title: 'Currencies', href: '/master/currencies', icon: <Banknote size={18} /> },
-      { title: 'PPJK', href: '/master/ppjk', icon: <Users size={18} /> },
+      {
+        title: "Companies",
+        href: "/master/companies",
+        icon: <Building2 size={18} />,
+      },
+      {
+        title: "Warehouses / TPS",
+        href: "/master/warehouses",
+        icon: <Warehouse size={18} />,
+      },
+      {
+        title: "Suppliers",
+        href: "/master/suppliers",
+        icon: <Truck size={18} />,
+      },
+      {
+        title: "Buyers",
+        href: "/master/buyers",
+        icon: <ShoppingCart size={18} />,
+      },
+      {
+        title: "HS Codes",
+        href: "/master/hs-codes",
+        icon: <Package size={18} />,
+      },
+      { title: "Products", href: "/master/products", icon: <Box size={18} /> },
+      {
+        title: "Packaging",
+        href: "/master/packaging",
+        icon: <Package size={18} />,
+      },
+      {
+        title: "Countries",
+        href: "/master/countries",
+        icon: <Globe size={18} />,
+      },
+      { title: "Ports", href: "/master/ports", icon: <Ship size={18} /> },
+      {
+        title: "Incoterms",
+        href: "/master/incoterms",
+        icon: <FileText size={18} />,
+      },
+      {
+        title: "Currencies",
+        href: "/master/currencies",
+        icon: <Banknote size={18} />,
+      },
+      { title: "PPJK", href: "/master/ppjk", icon: <Users size={18} /> },
     ],
   },
   {
-    title: 'SYSTEM',
+    title: "SYSTEM",
     items: [
-      { title: 'Audit Log', href: '/audit-log', icon: <Shield size={18} />, permission: 'canAccessAuditLog' },
-      { title: 'Reports', href: '/reports', icon: <BarChart3 size={18} />, permission: 'canAccessReports' },
-      { title: 'User Management', href: '/users', icon: <UsersRound size={18} />, permission: 'canAccessUserManagement' },
-      { title: 'Settings', href: '/settings', icon: <Settings size={18} />, permission: 'canAccessSettings' },
+      {
+        title: "Audit Log",
+        href: "/audit-log",
+        icon: <Shield size={18} />,
+        permission: "canAccessAuditLog",
+      },
+      {
+        title: "Reports",
+        href: "/reports",
+        icon: <BarChart3 size={18} />,
+        permission: "canAccessReports",
+      },
+      {
+        title: "User Management",
+        href: "/users",
+        icon: <UsersRound size={18} />,
+        permission: "canAccessUserManagement",
+      },
+      {
+        title: "Settings",
+        href: "/settings",
+        icon: <Settings size={18} />,
+        permission: "canAccessSettings",
+      },
+      {
+        title: "CEISA Sandbox PIB Test",
+        href: "/ceisa-sandbox-test",
+        icon: <FlaskConical size={18} />,
+        permission: "canAccessDebugMode",
+      },
     ],
   },
 ];
 
 const roleBadgeColors: Record<UserRole, string> = {
-  export_staff: 'bg-blue-100 text-blue-800 border-blue-200',
-  import_staff: 'bg-purple-100 text-purple-800 border-purple-200',
-  finance: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  viewer: 'bg-slate-100 text-slate-800 border-slate-200',
-  super_admin: 'bg-amber-100 text-amber-800 border-amber-200',
+  export_staff: "bg-blue-100 text-blue-800 border-blue-200",
+  import_staff: "bg-purple-100 text-purple-800 border-purple-200",
+  finance: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  viewer: "bg-slate-100 text-slate-800 border-slate-200",
+  super_admin: "bg-amber-100 text-amber-800 border-amber-200",
 };
 
 interface SidebarProps {
@@ -136,13 +219,15 @@ export function Sidebar({ onClose }: SidebarProps) {
       <div className="p-4 border-b border-sidebar-border flex items-start justify-between">
         <div>
           <h1 className="text-base font-semibold">Customs Operations</h1>
-          <p className="text-xs text-sidebar-foreground/70 mt-0.5">Export-Import System</p>
+          <p className="text-xs text-sidebar-foreground/70 mt-0.5">
+            Export-Import System
+          </p>
           {role && !loading && (
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className={cn(
                 "mt-2 text-xs font-medium border",
-                roleBadgeColors[role]
+                roleBadgeColors[role],
               )}
             >
               {getRoleLabel(role)}
@@ -174,10 +259,10 @@ export function Sidebar({ onClose }: SidebarProps) {
                     to={item.href}
                     onClick={onClose}
                     className={cn(
-                      'flex items-center gap-2.5 px-2 py-1.5 text-sm rounded-md',
+                      "flex items-center gap-2.5 px-2 py-1.5 text-sm rounded-md",
                       location.pathname === item.href
-                        ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-                        : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        : "text-sidebar-foreground/90 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
                     )}
                   >
                     {item.icon}

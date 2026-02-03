@@ -383,3 +383,196 @@ export async function getSubmissionHistory(
   
   return data || [];
 }
+
+/**
+ * Submit PIB to CEISA using metadata as source of truth
+ * 
+ * This function:
+ * 1. Validates that metadata exists and is complete
+ * 2. Generates XML from metadata
+ * 3. Submits to CEISA
+ * 
+ * @param pib_id - UUID of the PIB document  
+ * @returns SubmissionResult
+ */
+export async function submitPIBToCEISAFromMetadata(
+  pib_id: string
+): Promise<SubmissionResult> {
+  // Fetch PIB document with metadata
+  const { data: pib, error: fetchError } = await supabase
+    .from('pib_documents')
+    .select('id, document_number, metadata, status')
+    .eq('id', pib_id)
+    .single();
+  
+  if (fetchError || !pib) {
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: 'PIB document not found',
+      error_type: 'NOT_FOUND',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+  
+  // Validate metadata exists
+  if (!pib.metadata || Object.keys(pib.metadata).length === 0) {
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: 'PIB metadata is empty. Please save the PIB first to generate metadata.',
+      error_type: 'VALIDATION',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+  
+  // Import validation and XML generation functions
+  const pibMetadataModule = await import('@/lib/pib/pib-metadata');
+  const xmlMapperModule = await import('@/lib/edi/xml-mapper');
+  
+  const metadata = pib.metadata as pibMetadataModule.PIBMetadata;
+  
+  // Validate metadata
+  const validation = pibMetadataModule.validatePIBMetadata(metadata);
+  if (!validation.isValid) {
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: `Metadata validation failed:\n${validation.errors.join('\n')}`,
+      error_type: 'VALIDATION',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+  
+  // Check required fields for CEISA
+  const items = metadata?.items || [];
+  const missingPackagingCode = items.some((item) => !item?.packaging?.code);
+  if (missingPackagingCode) {
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: 'One or more items are missing PACKAGING.CODE. Please select Package Type for all items.',
+      error_type: 'VALIDATION',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+  
+  const packageUnit = metadata?.header?.totals?.package_unit;
+  if (!packageUnit) {
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: 'HEADER.TOTALS.PACKAGE_UNIT is empty. Please ensure items have Package Type selected.',
+      error_type: 'VALIDATION',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+  
+  try {
+    // Generate XML from metadata
+    const xml = xmlMapperModule.mapPIBMetadataToXML(metadata);
+    
+    // Generate hash
+    const { generateXMLHash } = await import('@/lib/edi/xml-hash');
+    const hash = await generateXMLHash(xml);
+    
+    // Store XML content for retry
+    await supabase
+      .from('pib_documents')
+      .update({ xml_content: xml })
+      .eq('id', pib_id);
+    
+    // Submit PIB to CEISA via edge function
+    const payload = {
+      action: 'submit',
+      document_type: 'PIB',
+      xml: xml,
+      metadata: metadata,
+      document_number: pib.document_number,
+    };
+    
+    console.log('Sending to CEISA', payload);
+    
+    const { data, error } = await supabase.functions.invoke('supabase-functions-ceisa-proxy', {
+      body: payload,
+    });
+    
+    if (error) {
+      console.error('CEISA Edge Function error:', error);
+      throw new Error(error.message || 'Failed to call CEISA API');
+    }
+    
+    console.log('CEISA Response:', data);
+    
+    // Parse response
+    const response = data as CEISAResponse;
+    
+    // Log attempt
+    await logSubmissionAttempt({
+      ref_type: 'PIB',
+      ref_id: pib_id,
+      document_number: pib.document_number || null,
+      attempt_number: 1,
+      request_xml: xml.substring(0, 10000),
+      request_hash: hash,
+      response_status: response?.status || 'ERROR',
+      response_message: response?.message || 'No response',
+      response_raw: response?.raw_response?.substring(0, 10000),
+      registration_number: response?.registration_number,
+      is_success: response?.success || false,
+      retry_allowed: !response?.success,
+    });
+    
+    if (response?.success) {
+      // Update document with registration number
+      await supabase
+        .from('pib_documents')
+        .update({
+          registration_number: response.registration_number,
+          status: 'CEISA_ACCEPTED',
+          ceisa_submitted_at: new Date().toISOString(),
+          ceisa_response_at: new Date().toISOString(),
+          ceisa_last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pib_id);
+      
+      return {
+        success: true,
+        peb_id: pib_id,
+        registration_number: response.registration_number,
+        submitted_at: new Date().toISOString(),
+        retry_allowed: false,
+        attempt_number: 1,
+      };
+    } else {
+      const errorType = parseErrorType(response?.message || 'Unknown error');
+      
+      return {
+        success: false,
+        peb_id: pib_id,
+        error_message: response?.message || 'CEISA submission failed',
+        error_type: errorType,
+        retry_allowed: isRetryableError(errorType),
+        attempt_number: 1,
+      };
+    }
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error during XML generation';
+    console.error('CEISA submission error:', error);
+    return {
+      success: false,
+      peb_id: pib_id,
+      error_message: errorMessage,
+      error_type: 'VALIDATION',
+      retry_allowed: false,
+      attempt_number: 0,
+    };
+  }
+}
