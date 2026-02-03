@@ -56,6 +56,7 @@ import { PIBAttachments } from "@/components/pib/PIBAttachments";
 import { PIBReviewSummary } from "@/components/pib/PIBReviewSummary";
 import { PIBXMLPreview } from "@/components/pib/PIBXMLPreview";
 import { PIBTaxBreakdown } from "@/components/pib/PIBTaxBreakdown";
+import { PPJKSearchDialog } from "@/components/pib/PPJKSearchDialog";
 import {
   PIBItem,
   PIBDocument,
@@ -301,6 +302,9 @@ export default function PIBFormPage() {
     email: "",
     is_active: true,
   });
+
+  // PPJK dialog state
+  const [ppjkDialogOpen, setPpjkDialogOpen] = useState(false);
 
   // Master data from Supabase
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -2059,21 +2063,25 @@ export default function PIBFormPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
                         <Label className="text-xs">PPJK</Label>
-                        <Select
-                          value={formData.ppjk_id}
-                          onValueChange={(v) => handleChange("ppjk_id", v)}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select PPJK (optional)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ppjkList.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>
-                                {p.code} - {p.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPpjkDialogOpen(true)}
+                            className="w-full h-8 justify-between text-sm"
+                          >
+                            {formData.ppjk_name ? (
+                              <span className="truncate">
+                                {formData.ppjk_name}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                Select PPJK (optional)
+                              </span>
+                            )}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </div>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs">PPJK NPWP</Label>
@@ -3052,6 +3060,21 @@ export default function PIBFormPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* PPJK Search Dialog */}
+      <PPJKSearchDialog
+        open={ppjkDialogOpen}
+        onOpenChange={setPpjkDialogOpen}
+        selectedId={formData.ppjk_id}
+        onSelect={(ppjk) => {
+          setFormData((prev) => ({
+            ...prev,
+            ppjk_id: ppjk.id,
+            ppjk_npwp: ppjk.npwp || "",
+            ppjk_name: ppjk.name,
+          }));
+        }}
+      />
     </AppLayout>
   );
 }
